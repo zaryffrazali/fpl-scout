@@ -334,7 +334,7 @@ function WatchlistBox({ players, watch, toggleWatch, onPick, pickLabel, md }) {
       {ws.length === 0 ? <div style={{ fontSize:11, color:DIM }}>Highlight players (★) in the Players tab to pin them here.</div>
         : <div style={{ maxHeight:220, overflowY:"auto" }}>{ws.map(p => (
             <div key={p.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 0", borderTop:`1px solid ${BORDER}33` }}>
-              <span style={{ flex:"1 1 auto", minWidth:0, fontSize:12, color:"#fff", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{flagOf(p)} {p.name} <span style={{ color:DIM, fontSize:10 }}>{p.pos} ${p.price}m{md!=null?` · ${mdScore(p,md).pts.toFixed(1)}xP`:""}</span></span>
+              <span style={{ flex:"1 1 auto", minWidth:0, fontSize:12, color:"#fff", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{flagOf(p)} {p.name} <span style={{ color:DIM, fontSize:10 }}>{p.pos} £{p.price}m{md!=null?` · ${mdScore(p,md).pts.toFixed(1)}xP`:""}</span></span>
               {onPick && <button onClick={()=>onPick(p)} style={{ fontSize:10, padding:"2px 7px", borderRadius:4, border:`1px solid ${BORDER}`, background:"transparent", color:"#4ade80", cursor:"pointer", whiteSpace:"nowrap" }}>{pickLabel||"view"}</button>}
               <button onClick={()=>toggleWatch(p.id)} title="Remove from watchlist" style={{ fontSize:12, padding:"2px 5px", borderRadius:4, border:"none", background:"transparent", color:"#fbbf24", cursor:"pointer" }}>★</button>
             </div>))}</div>}
@@ -403,12 +403,12 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
       {mobile && <WatchlistBox players={allPlayers} watch={watch} toggleWatch={toggleWatch} onPick={(p)=>setSelected(p)} pickLabel="view" />}
       {/* sort hint + count (sorting now lives on the clickable column headers) */}
       <div style={{ display:"flex", alignItems:"center", borderBottom:`1px solid ${BORDER}`, padding:"6px 2px" }}>
-        <span style={{ fontSize:11, color:DIM }}>Tip: click any column header (xPTS·3GW, VAL, GW1–3, OWN, TIER…) to sort high → low</span>
+        <span style={{ fontSize:11, color:DIM }}>Tip: click any column header (xPTS·3GW, xP/£M, VAPM, GW1–3, OWN, TIER…) to sort high → low</span>
         <span style={{ marginLeft:"auto", fontSize:10, color:DIM, paddingRight:4 }}>{players.length>200?`top 200 of ${players.length}`:`${players.length} players`}</span>
       </div>
 
       {/* last updated */}
-      {refreshed && <div style={{ textAlign:"right", fontSize:11, color:"#64748b", margin:"6px 0" }}>Data refreshed: {refreshed} MYT · Auto-refreshes every 3h</div>}
+      {refreshed && <div style={{ textAlign:"right", fontSize:11, color:"#64748b", margin:"6px 0" }}>Projections generated: {refreshed} MYT · rebuilt manually from the FPL API</div>}
 
       {/* table — empty-state meme, else mobile cards / desktop grid */}
       {players.length === 0 ? (
@@ -432,7 +432,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   <span style={{ flex:"0 0 auto", color: isOpen?"#f97316":DIM, fontSize:10 }}>{isOpen?"▲":"▼"}</span>
                 </div>
                 <div style={{ display:"flex", gap:8, fontSize:12, color:DIM, marginTop:3, whiteSpace:"nowrap", overflow:"hidden" }}>
-                  <span style={{ color:"#94a3b8" }}>${p.price}m</span>
+                  <span style={{ color:"#94a3b8" }}>£{p.price}m</span>
                   <span style={{ color:p.E_mins<60?"#eab308":"#94a3b8" }}>{Math.round(p.E_mins)}'</span>
                   <span style={{ color:p.displayPts>15?"#f97316":p.displayPts>11?"#22c55e":TEXT, fontWeight:700 }}>xPTS {p.displayPts.toFixed(1)}</span>
                   <span style={{ color:"#7b8cde" }} title="GW1·GW2·GW3 xPts">GW {mdScore(p,0).pts.toFixed(1)}·{mdScore(p,1).pts.toFixed(1)}·{mdScore(p,2).pts.toFixed(1)}</span>
@@ -500,7 +500,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   <span style={{ fontSize:11 }}>{p.form}</span>
                 </div>
               </div>
-              <div style={{ textAlign:"right", fontSize:15, color:"#94a3b8", fontWeight:600 }}>${p.price}m</div>
+              <div style={{ textAlign:"right", fontSize:15, color:"#94a3b8", fontWeight:600 }}>£{p.price}m</div>
               <div style={{ textAlign:"right", fontSize:12, color:p.E_mins<60?"#eab308":"#94a3b8" }}>{Math.round(p.E_mins)}'</div>
               <div title={`Predicted ${p.displayPts.toFixed(1)} pts over GW1-GW3 (${riskMode}). Floor ${p.pts_median?.toFixed(1)} · ceiling ${p.pts_p90?.toFixed(1)}`}
                 style={{ textAlign:"right", fontSize:18, fontWeight:800, cursor:"help",
@@ -508,7 +508,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
               <div title={`${(p.value||0).toFixed(2)} xPts per £m over GW1-GW3`} style={{ textAlign:"right", fontSize:13, fontWeight:700, cursor:"help", color:p.value>2.1?"#f97316":p.value>1.8?"#22c55e":DIM }}>{(p.value||0).toFixed(2)}</div>
               <div title={`${(p.vapm||0).toFixed(2)} xPts per £m above the 2 pts/GW appearance baseline`} style={{ textAlign:"right", fontSize:13, fontWeight:700, cursor:"help", color:p.vapm>1.1?"#f97316":p.vapm>0.9?"#22c55e":DIM }}>{(p.vapm||0).toFixed(2)}</div>
               {[0,1,2].map(mi => { const ms = mdScore(p, mi); return (
-                <div key={mi} title={`MD${mi+1}${ms.opp?` vs ${ms.opp}`:""} — projected ${ms.pts.toFixed(1)} pts`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color: ms.pts>6?"#f97316":ms.pts>4?"#22c55e":DIM }}>{ms.pts.toFixed(1)}</div>
+                <div key={mi} title={`GW${mi+1}${ms.opp?` vs ${ms.opp}`:""} — projected ${ms.pts.toFixed(1)} pts`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color: ms.pts>6?"#f97316":ms.pts>4?"#22c55e":DIM }}>{ms.pts.toFixed(1)}</div>
               ); })}
               <div style={{ textAlign:"right" }}><MispriceTag flag={p.mispricing_flag} score={p.intl_premium_score}/></div>
               <div style={{ display:"flex", justifyContent:"flex-end" }}><OwnBar pct={p.own}/></div>
@@ -545,7 +545,7 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14, flexWrap:"wrap", gap:10 }}>
         <div>
           <div style={{ fontSize:20, fontWeight:900, color:"#fff" }}>{flagOf(p)} {p.name}</div>
-          <div style={{ fontSize:12, color:DIM, marginTop:3 }}>{p.team} · {p.pos} · ${p.price}m · {p.own}% owned · {cleanCluster(p.team_cluster)}</div>
+          <div style={{ fontSize:12, color:DIM, marginTop:3 }}>{p.team} · {p.pos} · £{p.price}m · {p.own}% owned</div>
           {toggleWatch && <div style={{ fontSize:10, color:"#fbbf2599", marginTop:3 }}>Highlighted players appear in the Squad Planner ⭐</div>}
         </div>
         <div style={{ display:"flex", gap:6, flexShrink:0 }}>
@@ -579,7 +579,7 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
             return (
               <div key={f.md} style={{ marginBottom:9 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:3 }}>
-                  <span style={{ color:TEXT }}>MD{f.md} · {f.opponent}</span>
+                  <span style={{ color:TEXT }}>GW{f.md} · {f.opponent}</span>
                   <span style={{ color:DIM }}>{Math.round(f.oddsWin*100)}/{Math.round(f.oddsDraw*100)}/{Math.round(f.oddsLoss*100)}</span>
                 </div>
                 <div style={{ height:5, background:"#1e293b", borderRadius:3, overflow:"hidden" }}>
@@ -625,11 +625,12 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
         <div style={{ background:"#0a121f", borderRadius:8, padding:"12px 14px" }}>
           <div style={{ fontSize:9, letterSpacing:3, color:DIM, marginBottom:10 }}>MODEL DEEP DIVE</div>
           <ul style={{ margin:0, paddingLeft:16, fontSize:11, color:"#c8c8c8", lineHeight:1.7 }}>
-            <li>xG/90 club {p.xGp90} → adjusted {pred.xGadj.toFixed(2)}</li>
+            <li>npxG/90 <b style={{color:TEXT}}>{(p.xGp90||0).toFixed(3)}</b> · xA/90 <b style={{color:TEXT}}>{(p.xAp90||0).toFixed(3)}</b> <span style={{color:DIM}}>(shrunk, penalties split out)</span></li>
+            <li>xMins <b style={{color:TEXT}}>{Math.round(p.xm90 ?? pred.E_mins)}'</b> · P(start) <b style={{color:TEXT}}>{((p.startProb??0)*100).toFixed(0)}%</b></li>
+            <li>Clean-sheet prob <b style={{color:TEXT}}>{Math.round((pred.csP||0)*100)}%</b> · team goals vs league avg <b style={{color:TEXT}}>×{(pred.goalP||1).toFixed(2)}</b></li>
+            <li>xPts per £m <b style={{color:TEXT}}>{(pred.value||0).toFixed(2)}</b> · VAPM <b style={{color:TEXT}}>{(pred.vapm||0).toFixed(2)}</b></li>
             <li>Tier <b style={{color:p.tier==="S"?"#fbbf24":TEXT}}>{p.tier||"-"}</b> (score {p.tier_score ?? "—"})</li>
-            <li>Playstyle: {cleanCluster(p.team_cluster)}</li>
-            <li>Captain EV (R model): {p.captain_ev ?? "—"}</li>
-            {p.form_n>0 && <li>Intl form: <b style={{color:p.form_mult>1.05?"#4ade80":p.form_mult<0.95?"#ff6b6b":TEXT}}>×{p.form_mult}</b> (last {p.form_n} intl match{p.form_n>1?"es":""})</li>}
+            {p.penTaker && <li style={{color:"#fbbf24"}}>Penalties: first choice</li>}
           </ul>
           {p.mispricing_flag==="UNDERRATED" &&
             <div style={{ marginTop:8, fontSize:11, color:"#4ade80" }}>★ Model underprices: +{p.intl_premium_score?.toFixed(2)}σ value edge</div>}
@@ -686,7 +687,7 @@ function StartingXITab({ pool, mobile }) {
   const score = (p, mi) => mdScore(p, mi);   // single shared per-gameweek engine (no duplicate formula)
   const benchReason = (p, mi) => {
     const wins=(p.fixtures||[]).map(f=>f?.oddsWin||0), bestMd=wins.indexOf(Math.max(...wins));
-    if (bestMd>mi) return `Tough MD${mi+1} fixture — key MD${bestMd+1} asset`;
+    if (bestMd>mi) return `Tough GW${mi+1} fixture — key GW${bestMd+1} asset`;
     if ((p.startProb||1)<0.88) return "Rotation risk — monitor";
     if (p.own<10) return "Differential option — activate for easy fixtures";
     if (p.price<5.0) return "Budget enabler — quality backup";
@@ -694,7 +695,7 @@ function StartingXITab({ pool, mobile }) {
   };
   const buildXI = (mi) => {
     // budget-aware: optimise the 11 starters while RESERVING money for 4 cheap bench, so the
-    // whole 15-man squad fits $100m (the old version ignored budget and overspent on the bench too)
+    // whole 15-man squad fits £100m (the old version ignored budget and overspent on the bench too)
     const sc = pool.map(p=>{ const s=score(p,mi); return {...p, mdPts:s.pts, mdOpp:s.opp, mdWin:s.win}; });
     const byScore = pos => sc.filter(p=>p.pos===pos).sort((a,b)=>b.mdPts-a.mdPts);
     const byCheap = pos => sc.filter(p=>p.pos===pos).sort((a,b)=>a.price-b.price);
@@ -748,7 +749,7 @@ function StartingXITab({ pool, mobile }) {
   const allThree = id => idSets.every(s=>s.has(id));      // FIXTURE SHIFT = not in all 3 MD XIs
   const xi = xis[md], cap = xi.captain;
   const fixCtx = [...new Map(pool.filter(p=>(p.fixtures||[])[md]).map(p=>{const f=p.fixtures[md];return [p.team,{team:p.team,opp:f.opponent,win:f.oddsWin}];})).values()].sort((a,b)=>b.win-a.win).slice(0,5);
-  const MD_DATES=["Jun 11-15","Jun 16-21","Jun 22-27"];
+  const MD_DATES=["Aug 21-24","Aug 28-31","Sep 4-6"];
 
   return (
     <div>
@@ -757,17 +758,17 @@ function StartingXITab({ pool, mobile }) {
       <div style={{ display:"flex", gap:4, marginBottom:12 }}>
         {[0,1,2].map(i=>(
           <button key={i} onClick={()=>setMd(i)} style={{ padding:"7px 16px", borderRadius:6, fontFamily:"inherit", fontSize:13, cursor:"pointer", fontWeight:md===i?700:400,
-            border:`1px solid ${md===i?"#f97316":BORDER}`, background:md===i?"#f9731618":"transparent", color:md===i?"#f97316":DIM }}>MD{i+1}</button>
+            border:`1px solid ${md===i?"#f97316":BORDER}`, background:md===i?"#f9731618":"transparent", color:md===i?"#f97316":DIM }}>GW{i+1}</button>
         ))}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", flexWrap:"wrap", gap:8, marginBottom:6 }}>
-        <span style={{ fontSize:15, fontWeight:800, color:"#fff" }}>Formation: {xi.formation} | Total xPts: {Math.round(xi.total_pts)} | Budget: ${xi.budget}m used</span>
+        <span style={{ fontSize:15, fontWeight:800, color:"#fff" }}>Formation: {xi.formation} | Total xPts: {Math.round(xi.total_pts)} | Budget: £{xi.budget}m used</span>
         <label style={{ fontSize:11, color:DIM, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
           <input type="checkbox" checked={showDesc} onChange={e=>setShowDesc(e.target.checked)} style={{accentColor:"#f97316"}} /> Show descriptions
         </label>
       </div>
-      <div style={{ fontSize:12, color:DIM, marginBottom:6 }}>MD{md+1} — {MD_DATES[md]} | optimised for gameweek {md+1} fixtures</div>
-      <div style={{ fontSize:12, color:"#fbbf24", marginBottom:4, fontWeight:600 }}>MD{md+1} CAPTAIN: {cap.name} vs {cap.opp} ({Math.round(cap.win*100)}% win prob)</div>
+      <div style={{ fontSize:12, color:DIM, marginBottom:6 }}>GW{md+1} — {MD_DATES[md]} | optimised for gameweek {md+1} fixtures</div>
+      <div style={{ fontSize:12, color:"#fbbf24", marginBottom:4, fontWeight:600 }}>GW{md+1} CAPTAIN: {cap.name} vs {cap.opp} ({Math.round(cap.win*100)}% win prob)</div>
       <div style={{ fontSize:11, color:DIM, marginBottom:12 }}>Easiest fixtures: {fixCtx.map(x=>`${x.team} v ${x.opp} (${Math.round(x.win*100)}%)`).join(" · ")}</div>
       {mobile && <div style={{ fontSize:11, color:DIM, marginBottom:8 }}>Tap a player for detail · bench is below the pitch</div>}
       {<div style={{ position:"relative", width:"100%", maxWidth:560, margin:"0 auto", aspectRatio:"3/4",
@@ -800,7 +801,7 @@ function StartingXITab({ pool, mobile }) {
               <div key={b.id} onClick={()=>setOpen(open===b.id?null:b.id)} style={{ textAlign:"center", cursor:"pointer", flex:"1 1 0", minWidth:0 }}>
                 <div style={{ width:40, height:40, margin:"0 auto", borderRadius:"50%", background:POS_COLOR[b.pos], display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800, color:"#fff", border:"2px solid #ffffff44" }}>{b.pts_balanced}</div>
                 <div style={{ fontSize:10, color:"#fff", fontWeight:600, marginTop:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{b.name}</div>
-                <div style={{ fontSize:9, color:"#7fa890" }}>{b.pos} · ${b.price}m</div>
+                <div style={{ fontSize:9, color:"#7fa890" }}>{b.pos} · £{b.price}m</div>
               </div>
             ))}
           </div>
@@ -815,7 +816,7 @@ function StartingXITab({ pool, mobile }) {
                 {!allThree(pl.id) && <span style={{ fontSize:9, color:"#f97316", marginLeft:6, fontFamily:MONO }}>⇄ SHIFT</span>}</span>
               <span style={{ fontSize:12, color:POS_COLOR[pl.pos], fontFamily:MONO }}>{pl.pos}</span>
             </div>
-            <div style={{ fontSize:11, color:DIM, margin:"4px 0" }}>{pl.team} · ${pl.price}m · {pl.pts_balanced} xPts · {pl.value} val</div>
+            <div style={{ fontSize:11, color:DIM, margin:"4px 0" }}>{pl.team} · £{pl.price}m · {pl.pts_balanced} xPts · {pl.value} val</div>
             {showDesc && (() => {
               const why = `GW${md+1} pick — ${Math.round(pl.mdWin*100)}% win vs ${pl.mdOpp}, ${pl.pts_balanced} xPts over GW1–GW3.`;
               const key = (pl.pos==="GK"||pl.pos==="DEF")
@@ -849,7 +850,7 @@ function StartingXITab({ pool, mobile }) {
                   {b.name}</span>
                 <span style={{ fontSize:11, color:POS_COLOR[b.pos], fontFamily:MONO }}>{b.pos}</span>
               </div>
-              <div style={{ fontSize:11, color:DIM, margin:"4px 0" }}>${b.price}m · Bench EV: {b.benchPts} pts</div>
+              <div style={{ fontSize:11, color:DIM, margin:"4px 0" }}>£{b.price}m · Bench EV: {b.benchPts} pts</div>
               <div style={{ fontSize:11, color:"#94a3b8" }}>{b.benchReason}</div>
             </div>
           ))}
@@ -862,7 +863,7 @@ function StartingXITab({ pool, mobile }) {
 // ─── TAB: OPTIMAL SQUADS ─────────────────────────────────────────────────────────
 // Squad builder (client-side). Optimises the STARTING XI's points and fills the 4 bench slots with the
 // CHEAPEST valid players — so it never wastes budget stacking 8 premium attackers (only 7 can start) and
-// it spends on a real starting keeper. 2/5/5/3, $100m, ≤3 per team; always returns a valid, complete 15.
+// it spends on a real starting keeper. 2/5/5/3, £100m, ≤3 per team; always returns a valid, complete 15.
 function buildBalancedSquad(pool, scoreFn, spMin, opts = {}) {
   const benchSp = opts.benchSpMin ?? 0.70, benchMinPts = opts.benchMinPts ?? 8;
   const restricted = pool.filter(p => p.price > 0 && (!opts.candFilter || opts.candFilter(p)));
@@ -953,7 +954,7 @@ function OptimalSquadsTab({ squads, meta, mobile }) {
             <div style={{ fontSize:mobile?11:10, color:"#475569", fontFamily:MONO, marginBottom:8 }}>{m.objective||""}</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:10, fontSize:11, color:DIM, marginBottom:10, borderBottom:`1px solid ${BORDER}`, paddingBottom:8 }}>
               <span><b style={{color:TEXT}}>{m.total_pts??"—"}</b> XI pts</span>
-              <span><b style={{color:TEXT}}>${m.budget??"—"}m</b></span>
+              <span><b style={{color:TEXT}}>£{m.budget??"—"}m</b></span>
               <span>own <b style={{color:TEXT}}>{m.avg_own??"—"}%</b></span>
               <span>scout <b style={{color:"#4ade80"}}>{m.n_scout??0}</b></span>
               <span>template <b style={{color:TEXT}}>{m.template_overlap_pct??"—"}%</b></span>
@@ -1004,7 +1005,7 @@ function TiersTab({ tiers, pool, riskMode, posFilter, setPosFilter, pureDiff, se
         <div style={{ display:"flex", gap:5, alignItems:"center", marginBottom:6, flexWrap:"wrap" }}>
           <span style={{ fontSize:11, color:DIM }}>{p.team}</span>
           <span title={POS_TIP[p.pos]} style={{ fontSize:10, color:POS_COLOR[p.pos], border:`1px solid ${POS_COLOR[p.pos]}44`, padding:"0 5px", borderRadius:3, fontFamily:MONO, cursor:"help" }}>{p.pos}</span>
-          <span style={{ fontSize:11, color:DIM }}>${p.price}m · {band}</span>
+          <span style={{ fontSize:11, color:DIM }}>£{p.price}m · {band}</span>
           {isBest && <Badge bg="#3b2f0a" bd="#fbbf24" fg="#fbbf24" title="Highest tier score in this position + price band">BEST IN BAND</Badge>}
           {p.own<5 && <ScoutBadge/>}
           {p.mispricing_flag==="UNDERRATED" && <Badge bg="#16a34a22" bd="#22c55e88" fg="#4ade80" title={`Value edge: +${(p.intl_premium_score||0).toFixed(2)}σ points per £m`}>★ MODEL EDGE</Badge>}
@@ -1048,7 +1049,7 @@ function TiersTab({ tiers, pool, riskMode, posFilter, setPosFilter, pureDiff, se
                   <div key={b+pos} style={{ background:CARD, border:`2px solid ${tc}`, borderRadius:8, padding:"9px 11px" }}>
                     <div style={{ fontSize:9, color:DIM, letterSpacing:1, marginBottom:3 }}>BEST {b} {pos}</div>
                     <div style={{ color:"#fff", fontWeight:700, fontSize:13 }}>{TEAM_FLAG[best.team]||best.nat||"🏳️"} {best.name}</div>
-                    <div style={{ fontSize:11, color:DIM, marginTop:2 }}><b style={{color:tc}}>{best.tier}</b> · {xptsOf(best)?.toFixed(1)} xPts · ${best.price}m</div>
+                    <div style={{ fontSize:11, color:DIM, marginTop:2 }}><b style={{color:tc}}>{best.tier}</b> · {xptsOf(best)?.toFixed(1)} xPts · £{best.price}m</div>
                     <div style={{ fontSize:10, color:"#94a3b8", marginTop:3, fontStyle:"italic" }}>{(n.one_line_verdict||n.headline||"").slice(0,70)}</div>
                   </div>
                 );
@@ -1324,7 +1325,7 @@ function LineupsTab({ lineups, pool, goToPlayer, mobile, narrow, sel, setSel, cm
                   <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", marginTop:2 }}>
                     <span style={{ fontSize:10, color:POS_COLOR[pl.position], fontFamily:MONO }}>{pl.slot}</span>
                     <Badge bg={pl.status==="CERTAIN"?"#16a34a22":pl.status==="DOUBT"?"#3d2a00":"#1e293b"} bd={pl.status==="CERTAIN"?"#22c55e88":pl.status==="DOUBT"?"#eab30888":"#334155"} fg={pl.status==="CERTAIN"?"#4ade80":pl.status==="DOUBT"?"#eab308":"#94a3b8"}>{pl.status}</Badge>
-                    {m && <span style={{ fontSize:10, color:DIM }}>${m.price}m · {m.pts_balanced} xPts · {m.own}%</span>}
+                    {m && <span style={{ fontSize:10, color:DIM }}>£{m.price}m · {m.pts_balanced} xPts · {m.own}%</span>}
                     {m && mobile && <span onClick={(e)=>{e.stopPropagation();goToPlayer(m.name);}} style={{ fontSize:13, color:"#f97316", cursor:"pointer" }}>→</span>}
                   </div>
                   {pl.doubt_reason && <div style={{ fontSize:10, color:"#ff6b6b", marginTop:2 }}>{pl.doubt_reason}</div>}
@@ -1360,7 +1361,7 @@ function LineupsTab({ lineups, pool, goToPlayer, mobile, narrow, sel, setSel, cm
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>{picks.map(x=>(
             <div key={x.m.id} onClick={()=>goToPlayer(x.m.name)} style={{ background:BG, border:`1px solid ${BORDER}`, borderRadius:8, padding:"7px 10px", cursor:"pointer", minWidth:130 }}>
               <div style={{ color:"#fff", fontWeight:700, fontSize:12 }}>{x.m.name} <span style={{ fontSize:10, color:POS_COLOR[x.m.pos] }}>{x.m.pos}</span></div>
-              <div style={{ fontSize:11, color:DIM }}>${x.m.price}m · {x.m.pts_balanced} xPts · {x.m.own}% {x.m.tier&&<b style={{color:TIER_COLOR[x.m.tier]}}>· {x.m.tier}</b>}</div>
+              <div style={{ fontSize:11, color:DIM }}>£{x.m.price}m · {x.m.pts_balanced} xPts · {x.m.own}% {x.m.tier&&<b style={{color:TIER_COLOR[x.m.tier]}}>· {x.m.tier}</b>}</div>
             </div>))}</div>
         </div>}
         <div style={{ marginTop:12, fontSize:10, color:DIM, fontStyle:"italic" }}>🤖 AI predicted lineup based on squad knowledge · Verify against official team announcements</div>
@@ -1786,13 +1787,13 @@ function NewsTab({ news, mobile }) {
   );
 }
 
-// ─── TAB: PLANNER (build 15-man squad, $100m cap, per-MD xP, transfers, PNG) ──────
+// ─── TAB: PLANNER (build 15-man squad, £100m cap, per-MD xP, transfers, PNG) ──────
 const PL_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 };   // 15-man squad shape
 const PL_XI_MAX = { GK: 1, DEF: 5, MID: 5, FWD: 3 };   // max of each position in the starting XI
 const PL_BUDGET = 100;
 const PL_FORMS = [[3, 4, 3], [3, 5, 2], [4, 3, 3], [4, 4, 2], [4, 5, 1], [5, 3, 2], [5, 4, 1]];
 const PL_KEY = "fpl_planner_v1";
-const PL_MD_DATES = ["Jun 11-15", "Jun 16-21", "Jun 22-27"];
+const PL_MD_DATES = ["Aug 21-24", "Aug 28-31", "Sep 4-6"];
 
 function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   const byId = useMemo(() => { const m = {}; (pool || []).forEach(p => { m[p.id] = p; }); return m; }, [pool]);
@@ -1888,7 +1889,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   };
 
   // Autofill: fill remaining squad slots with the highest next-MD xP players that are affordable,
-  // reserving ~$3.9m per still-empty slot so the squad can always be completed to 15.
+  // reserving ~£3.9m per still-empty slot so the squad can always be completed to 15.
   const autofill = () => {
     const sq = [...squad];
     const priceOf = id => byId[id]?.price || 0;
@@ -1964,7 +1965,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
         <span style={{ fontSize: 10, color: POS_COLOR[p.pos], fontFamily: MONO, width: 26 }}>{p.pos}</span>
         <div style={{ flex: "1 1 auto", minWidth: 0 }}>
           <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{flagOf(p)} {p.name} {isC && <span style={{ color: "#fbbf24" }}>©</span>}{isVC && <span style={{ color: "#cbd5e1" }}>Ⓥ</span>} {scout && <span title="Scout-bonus eligible (<5% owned): +2 pts if returns >4">🔍</span>}</div>
-          <div style={{ fontSize: 10, color: DIM }}>{p.team} · ${p.price}m · {opp ? `MD${md + 1} vs ${opp}` : `no MD${md + 1} fixture`} · <b style={{ color: pts > 6 ? "#f97316" : pts > 4 ? "#22c55e" : DIM }}>{pts} xP</b></div>
+          <div style={{ fontSize: 10, color: DIM }}>{p.team} · £{p.price}m · {opp ? `GW${md + 1} vs ${opp}` : `no GW${md + 1} fixture`} · <b style={{ color: pts > 6 ? "#f97316" : pts > 4 ? "#22c55e" : DIM }}>{pts} xP</b></div>
         </div>
         <button onClick={() => toggleStarter(p.id)} title="Toggle starter / bench" style={{ ...btn(isS), padding: "4px 8px" }}>{isS ? "XI" : "sub"}</button>
         <button onClick={() => { setCaptain(p.id); if (viceCaptain === p.id) setViceCaptain(null); }} disabled={!isS} title="Make captain" style={{ ...btn(isC), padding: "4px 8px", opacity: isS ? 1 : 0.4 }}>C</button>
@@ -1981,7 +1982,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
       <div style={{ fontSize: 10, color: DIM, marginBottom: 10 }}>Budget ${spent}m/{PL_BUDGET}m · {formationValid ? formationStr : "XI incomplete"}</div>
       {[0, 1, 2].map(mi => (
         <div key={mi} style={{ marginBottom: 12, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: "#f97316", marginBottom: 4 }}>MD{mi + 1} ({PL_MD_DATES[mi]}) — {mdTotal(mi)} xPts</div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#f97316", marginBottom: 4 }}>GW{mi + 1} ({PL_MD_DATES[mi]}) — {mdTotal(mi)} xPts</div>
           {starters.map(id => byId[id]).filter(Boolean).sort((a, b) => POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos)).map(p => (
             <div key={p.id} style={{ fontSize: 11, color: "#cbd5e1", display: "flex", justifyContent: "space-between" }}>
               <span>{p.pos} · {p.name}{captain === p.id ? " ©" : ""} {oppOf(p, mi) ? `vs ${oppOf(p, mi)}` : ""}</span>
@@ -2011,7 +2012,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           <button onClick={autofill} disabled={squad.length >= 15} style={btn(false)}>✨ Autofill (best xP, affordable)</button>
-          <button onClick={() => autoXI(md)} disabled={squad.length < 11} style={btn(false)}>⚡ Auto-pick XI (MD{md + 1})</button>
+          <button onClick={() => autoXI(md)} disabled={squad.length < 11} style={btn(false)}>⚡ Auto-pick XI (GW{md + 1})</button>
           <button onClick={exportPng} disabled={!starters.length || pngBusy} style={btn(false)}>{pngBusy ? "…rendering" : "📸 Save PNG (3 MDs)"}</button>
           <button onClick={() => { if (confirm("Clear your whole squad?")) { setSquad([]); setStarters([]); setCaptain(null); setViceCaptain(null); setTransfers(0); setPendingOut(0); setSubbingId(null); setMenuId(null); } }} style={{ ...btn(false), color: "#ff6b6b", borderColor: "#ef444455" }}>Clear</button>
         </div>
@@ -2020,8 +2021,8 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
 
       {/* MD tabs + total */}
       <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
-        {[0, 1, 2].map(i => <button key={i} onClick={() => setMd(i)} style={btn(md === i)}>MD{i + 1}</button>)}
-        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#fff" }}>MD{md + 1} projected: <span style={{ color: "#f97316" }}>{mdTotal(md)} xPts</span></span>
+        {[0, 1, 2].map(i => <button key={i} onClick={() => setMd(i)} style={btn(md === i)}>GW{i + 1}</button>)}
+        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#fff" }}>GW{md + 1} projected: <span style={{ color: "#f97316" }}>{mdTotal(md)} xPts</span></span>
       </div>
 
       <div style={{ display:"flex", gap:14, alignItems:"flex-start", flexDirection: mobile?"column":"row", marginBottom:10 }}>
@@ -2031,7 +2032,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>Starting XI {formationValid ? `· ${formationStr}` : `· ${starters.length}/11`} {!formationValid && <span style={{ color: "#eab308", fontWeight: 400, fontSize: 11 }}>(pick a valid XI: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD)</span>}</span>
-            <span style={{ fontSize: 11, color: DIM }}>tap a player = captain · MD{md + 1}: <b style={{ color: "#f97316" }}>{mdTotal(md)} xPts</b></span>
+            <span style={{ fontSize: 11, color: DIM }}>tap a player = captain · GW{md + 1}: <b style={{ color: "#f97316" }}>{mdTotal(md)} xPts</b></span>
           </div>
           <div onClick={() => setMenuId(null)} style={{ position: "relative", width: "100%", maxWidth: 560, margin: "0 auto", aspectRatio: "3/4", background: "linear-gradient(#0a3d1f,#072d17)", border: "2px solid #1e6b3a", borderRadius: 10 }}>
             <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 1, background: "#2e7d4f" }} />
@@ -2084,7 +2085,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
                       title={subbingId ? (canIn ? "Swap in" : "Can't swap — would break the formation") : "Move into starting XI"}
                       style={{ background: CARD, border: `1px solid ${canIn ? "#22c55e" : BORDER}`, borderRadius: 8, padding: "6px 10px", cursor: dim ? "not-allowed" : "pointer", minWidth: 130, opacity: dim ? 0.4 : 1, boxShadow: canIn ? "0 0 8px #22c55e55" : "none" }}>
                       <div style={{ fontSize: 12, color: "#fff", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 150 }}><span style={{ color: POS_COLOR[p.pos], fontFamily: MONO, fontSize: 10 }}>{p.pos}</span> {flagOf(p)} {p.name}</div>
-                      <div style={{ fontSize: 10, color: DIM }}>{ptsOf(p, md)} xP · ${p.price}m</div>
+                      <div style={{ fontSize: 10, color: DIM }}>{ptsOf(p, md)} xP · £{p.price}m</div>
                     </div>
                   );
                 })}
@@ -2112,7 +2113,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
       {pickPos && (
         <div style={{ background: CARD, border: `1px solid #f9731655`, borderRadius: 10, padding: 12, marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <b style={{ color: "#fff", fontSize: 13 }}>Add a {pickPos} — highest MD{md + 1} xP first</b>
+            <b style={{ color: "#fff", fontSize: 13 }}>Add a {pickPos} — highest GW{md + 1} xP first</b>
             <button onClick={() => setPickPos(null)} style={{ ...btn(false), padding: "4px 8px" }}>close</button>
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -2131,7 +2132,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
                 <div key={p.id} onClick={() => addPlayer(p)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, cursor: "pointer", border: `1px solid ${BORDER}33` }}>
                   <span style={{ color: "#fff", fontSize: 13, fontWeight: 600, flex: "1 1 auto", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{flagOf(p)} {p.name} {scoutEligible(p) && "🔍"}</span>
                   <span style={{ fontSize: 11, color: DIM }}>{p.team}</span>
-                  <span style={{ fontSize: 11, color: "#94a3b8" }}>${p.price}m</span>
+                  <span style={{ fontSize: 11, color: "#94a3b8" }}>£{p.price}m</span>
                   <span style={{ fontSize: 12, color: s > 6 ? "#f97316" : s > 4 ? "#22c55e" : DIM, fontWeight: 700, width: 34, textAlign: "right" }}>{s}</span>
                 </div>
               ))}
@@ -2145,13 +2146,13 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
 
       {/* suggested transfers */}
       <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: 12, marginTop: 6 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 6 }}>💡 Suggested transfers — MD{md + 1} (by xP gain · 🔍 = scout upgrade)</div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 6 }}>💡 Suggested transfers — GW{md + 1} (by xP gain · 🔍 = scout upgrade)</div>
         {sp.length < 11 ? <div style={{ fontSize: 12, color: DIM }}>Fill your squad to see transfer suggestions.</div>
-          : suggestions.length === 0 ? <div style={{ fontSize: 12, color: DIM }}>No positive-value swaps within budget — your squad looks optimal for MD{md + 1}.</div>
+          : suggestions.length === 0 ? <div style={{ fontSize: 12, color: DIM }}>No positive-value swaps within budget — your squad looks optimal for GW{md + 1}.</div>
             : suggestions.map((sg, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: i ? `1px solid ${BORDER}33` : "none", fontSize: 12, flexWrap: "wrap" }}>
                 <span style={{ color: "#ff8c42", flex: "1 1 120px" }}>OUT {sg.outP.name} <span style={{ color: DIM }}>({ptsOf(sg.outP, md)})</span></span>
-                <span style={{ color: "#4ade80", flex: "1 1 120px" }}>IN {sg.inP.name} {scoutEligible(sg.inP) && "🔍"} <span style={{ color: DIM }}>({ptsOf(sg.inP, md)}, ${sg.inP.price}m)</span></span>
+                <span style={{ color: "#4ade80", flex: "1 1 120px" }}>IN {sg.inP.name} {scoutEligible(sg.inP) && "🔍"} <span style={{ color: DIM }}>({ptsOf(sg.inP, md)}, £{sg.inP.price}m)</span></span>
                 <span style={{ color: "#f97316", fontWeight: 700 }}>+{sg.gain}</span>
                 <button onClick={() => applySwap(sg.outP.id, sg.inP.id)} style={{ ...btn(false), padding: "4px 8px" }}>apply</button>
               </div>
@@ -2187,7 +2188,7 @@ function OddsTab({ pool, lineups, mobile }) {
       .map(p => ({ p, ...mdScorerProb(p, md) })).filter(x => x.pGoal > 0.03);
     return { goals: ps.slice().sort((a, b) => b.pGoal - a.pGoal).slice(0, 5), assists: ps.slice().sort((a, b) => b.pAssist - a.pAssist).slice(0, 3) };
   };
-  const MD_DATES = ["Jun 11–15", "Jun 16–21", "Jun 22–27"];
+  const MD_DATES = ["Aug 21–24", "Aug 28–31", "Sep 4–6"];
   const Row = ({ g, key2 }) => (
     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "2px 0" }}>
       <span style={{ color: "#e2e8f0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.p.name} <span style={{ color: DIM, fontSize: 10 }}>{g.p.team}</span></span>
@@ -2199,7 +2200,7 @@ function OddsTab({ pool, lineups, mobile }) {
       <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>🎲 Match Odds & Scorer Probabilities</div>
       <div style={{ fontSize: 11, color: DIM, marginBottom: 10 }}>Model-implied probabilities (Poisson on the xG/xA model) — not bookmaker lines. Group stage · {matches.length} fixtures.</div>
       <div style={{ display: "flex", gap: 4, marginBottom: 12, alignItems: "center" }}>
-        {[0, 1, 2].map(i => <button key={i} onClick={() => setMd(i)} style={{ padding: "7px 16px", borderRadius: 6, fontFamily: "inherit", fontSize: 13, cursor: "pointer", fontWeight: md === i ? 700 : 400, border: `1px solid ${md === i ? "#f97316" : BORDER}`, background: md === i ? "#f9731618" : "transparent", color: md === i ? "#f97316" : DIM }}>MD{i + 1}</button>)}
+        {[0, 1, 2].map(i => <button key={i} onClick={() => setMd(i)} style={{ padding: "7px 16px", borderRadius: 6, fontFamily: "inherit", fontSize: 13, cursor: "pointer", fontWeight: md === i ? 700 : 400, border: `1px solid ${md === i ? "#f97316" : BORDER}`, background: md === i ? "#f9731618" : "transparent", color: md === i ? "#f97316" : DIM }}>GW{i + 1}</button>)}
         <span style={{ marginLeft: "auto", fontSize: 11, color: DIM }}>{MD_DATES[md]}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(auto-fill,minmax(330px,1fr))", gap: 12 }}>
@@ -2440,7 +2441,7 @@ export default function App() {
             <span style={{ marginLeft:"auto" }}><UrlBadge /></span>
           </div>
           <div style={{ fontSize:mobile?10:11, color:"#475569", marginTop:3, fontStyle:"italic" }}>makscouthijau — .uk because that was the cheapest domain</div>
-          <div style={{ fontSize:mobile?11:12, color:DIM, marginTop:4 }}>Points Prediction Engine · {rawPlayers.length} players · R-model engine{analytics ? " · analytics loaded" : ""}</div>
+          <div style={{ fontSize:mobile?11:12, color:DIM, marginTop:4 }}>Expected-points engine · {rawPlayers.length} players · Dixon–Coles + fitted xMins · GW1–GW3</div>
         </div>
       </div>
 
