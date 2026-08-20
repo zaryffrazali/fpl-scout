@@ -635,7 +635,7 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
           <div style={{ fontSize:9, letterSpacing:3, color:DIM, marginBottom:10 }}>MODEL DEEP DIVE</div>
           <ul style={{ margin:0, paddingLeft:16, fontSize:11, color:"#c8c8c8", lineHeight:1.7 }}>
             <li>npxG/90 <b style={{color:TEXT}}>{(p.xGp90||0).toFixed(3)}</b> · xA/90 <b style={{color:TEXT}}>{(p.xAp90||0).toFixed(3)}</b> <span style={{color:DIM}}>(shrunk, penalties split out)</span></li>
-            <li>xMins <b style={{color:TEXT}}>{Math.round(p.xm90 ?? pred.E_mins)}'</b> · P(start) <b style={{color:TEXT}}>{((p.startProb??0)*100).toFixed(0)}%</b></li>
+            <li>xMins <b style={{color:TEXT}}>{Math.round(p.xm90 ?? pred.E_mins)}'</b> · <span title="P(3+ starts in the first six gameweeks) — the classifier's actual target. NOT the probability he starts this particular match; a player at 97% here can still be starting only ~71% of games. Read xMins for that." style={{cursor:"help",borderBottom:"1px dotted #64748b"}}>regular starter</span> <b style={{color:TEXT}}>{((p.startProb??0)*100).toFixed(0)}%</b></li>
             <li>Clean-sheet prob <b style={{color:TEXT}}>{Math.round((pred.csP||0)*100)}%</b> · team goals vs league avg <b style={{color:TEXT}}>×{(pred.goalP||1).toFixed(2)}</b></li>
             <li>xPts per £m <b style={{color:TEXT}}>{(pred.value||0).toFixed(2)}</b> · VAPM <b style={{color:TEXT}}>{(pred.vapm||0).toFixed(2)}</b></li>
             <li>Tier <b style={{color:p.tier==="S"?"#fbbf24":TEXT}}>{p.tier||"-"}</b> (score {p.tier_score ?? "—"})</li>
@@ -1095,8 +1095,8 @@ function buildOptimalSquads(pool) {
   const defs = {
     safe: {
       label: "Safe — Minutes Certainty",
-      description: "Maximise points, but only over players the minutes model is confident in: 72+ projected minutes and 90%+ to start, bench included. You will never be the manager whose captain was benched.",
-      objective: "max XI Σ xPts  s.t.  xMins ≥ 72, P(start) ≥ 0.90",
+      description: "Maximise points, but only over players the minutes model is confident in: 72+ projected minutes, and 90%+ to be a regular starter. Note the second condition is weaker than it sounds — it is P(3+ starts in six gameweeks), not P(starts this match). xMins is the binding one.",
+      objective: "max XI Σ xPts  s.t.  xMins ≥ 72, P(regular) ≥ 0.90",
       score: X, sp: 0.90,
       opts: { candFilter: p => (p.xm90 || 0) >= 72, benchSpMin: 0.85, benchMinPts: 8 },
     },
