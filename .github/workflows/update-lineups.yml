@@ -1,0 +1,47 @@
+name: Update Predicted Lineups
+
+# Add ANTHROPIC_API_KEY in repo Settings → Secrets and variables → Actions → New repository secret
+permissions:
+  contents: write
+
+on:
+  # Manual trigger only — Opus model is expensive,
+  # run this deliberately before each matchday
+  workflow_dispatch:
+
+jobs:
+  fetch-lineups:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build confirmed squads if missing
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ ! -f r-analytics/data/wc2026_squads.json ]; then
+            echo "Squads file missing — building from Wikipedia (6 confederation searches)…"
+            npm run build-squads
+          else
+            echo "Squads file present."
+          fi
+      - name: Fetch lineups
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run fetch-lineups
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/data/lineups.json public/data/lineups_checkpoint.json r-analytics/data/wc2026_squads.json
+          if git diff --staged --quiet; then
+            echo "No lineup changes."
+          else
+            git commit -m "data: refresh predicted lineups (batch)"
+            git pull --rebase --autostash origin main   # handle 'fetch first' rejection from concurrent runs
+            git push
+          fi

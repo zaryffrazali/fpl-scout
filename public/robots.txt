@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://makscouthijau.uk/sitemap.xml
