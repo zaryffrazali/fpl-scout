@@ -463,7 +463,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
           {SH("md0","GW1","right","Projected xPts in Gameweek 1")}
           {SH("md1","GW2","right","Projected xPts in Gameweek 2")}
           {SH("md2","GW3","right","Projected xPts in Gameweek 3")}
-          {SH("intl","VALUE σ","right","Value edge (σ): projected points per £m versus other players in the same position — the model's mispricing signal. Positive = underrated vs price, negative = overrated. Click to sort high → low.")}
+          {SH("blend","BLEND","right","Ranking blend: 0.35 × this model + 0.65 × last season's total points, both z-scored. Replaying 2025/26 GW1–6, last season's points out-ranked the model on its own (Spearman 0.713 vs 0.683) and the blend beat both (0.718, and 8 of the true top 20 against 7 for either alone). Use it as a second opinion on the top of the table, not as a points estimate.")}
           {SH("own","OWN")}
           {SH("tier","TIER","center")}
           <div style={{textAlign:"right"}}>FIX</div>
@@ -491,6 +491,8 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   {p.mispricing_flag==="UNDERRATED" && <Badge bg="#16a34a22" bd="#22c55e88" fg="#4ade80" title={`Value edge: +${(p.intl_premium_score||0).toFixed(2)}σ points per £m vs position. May be undervalued.`}>★ EDGE</Badge>}
                   {isFranPick(p) && <Badge bg="#1e3a8a44" bd="#3b82f6aa" fg="#93c5fd" title="FPL Fran's S-tier / best-by-position pick">👍 FRAN</Badge>}
                   {p.penTaker && <PenBadge/>}
+                  {p.promoted_side && <Badge bg="#4c1d9522" bd="#a855f788" fg="#c4b5fd" title="Newly promoted: no Premier League match history to fit on, so this club's goal model rests entirely on the official FDR and its players' rates are positional priors rather than their own. Treat any projection here as a prior, not a forecast.">NEW TO PL</Badge>}
+                  {p.minutes_confidence === "low" && <Badge bg="#78350f22" bd="#f59e0b88" fg="#fcd34d" title="This club's squad list in the snapshot is too short (or too long) for the minutes budget to be corrected in full, so expected minutes here are still under- or over-stated. Refresh the snapshot once the transfer window closes.">xMINS ?</Badge>}
                   {p.data_tier && p.data_tier!=="curated" && <Badge bg="#1e293b" bd="#334155" fg="#64748b" title="Prior-filled — stats from position/price priors (not hand-curated or FBref-matched). Lower confidence.">prior</Badge>}
                   {p.form_n>0 && <Badge bg="#0a1f1c" bd={p.form_mult>1.05?"#22c55e88":p.form_mult<0.95?"#ef444488":"#33415588"} fg={p.form_mult>1.05?"#4ade80":p.form_mult<0.95?"#ff6b6b":"#94a3b8"} title={`International form ×${p.form_mult} vs club baseline (last ${p.form_n} match${p.form_n>1?"es":""}), applied to xG/xA.`}>≈×{p.form_mult}</Badge>}
                 </div>
@@ -510,7 +512,9 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
               {[0,1,2].map(mi => { const ms = mdScore(p, mi); return (
                 <div key={mi} title={`GW${mi+1}${ms.opp?` vs ${ms.opp}`:""} — projected ${ms.pts.toFixed(1)} pts`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color: ms.pts>6?"#f97316":ms.pts>4?"#22c55e":DIM }}>{ms.pts.toFixed(1)}</div>
               ); })}
-              <div style={{ textAlign:"right" }}><MispriceTag flag={p.mispricing_flag} score={p.intl_premium_score}/></div>
+              <div title={`Blend ${(p.blend_z??0).toFixed(2)}σ — model ${p.model_xpts?.toFixed(1)} xPts, last season ${p.last_season_pts ?? "—"} pts`}
+                style={{ textAlign:"right", fontSize:13, fontWeight:700, fontFamily:MONO, cursor:"help",
+                color:(p.blend_z??0)>2?"#f97316":(p.blend_z??0)>1?"#22c55e":(p.blend_z??0)<-0.5?"#64748b":DIM }}>{(p.blend_z??0)>0?"+":""}{(p.blend_z??0).toFixed(2)}</div>
               <div style={{ display:"flex", justifyContent:"flex-end" }}><OwnBar pct={p.own}/></div>
               <div title={TIER_TIP[p.tier]||""} style={{ textAlign:"center", fontSize:13, fontWeight:800, fontFamily:MONO, cursor:"help",
                 color:p.tier==="S"?"#fbbf24":p.tier==="A"?"#cbd5e1":p.tier==="B"?"#d97706":DIM }}>{p.tier||"-"}</div>
@@ -1573,13 +1577,33 @@ log λ_away = μ + att[away] − def[home]     + β·FDR`}</MtFormula>
         <MtNote>Rule going forward: a second scoring formula in the client is a second model, and it will drift from the first one silently.</MtNote>
       </MtCollapse>
 
+      <MtCollapse title="2.8 — Corrections from the end-to-end audit" sub="what was wrong and what it was worth">
+        <div>Four defects found reviewing the pipeline against the live rules and the match archive:</div>
+        <MtTable head={["Defect","Effect","Status"]} rows={[
+          ["Expected minutes were unconstrained","A team plays 990 player-minutes a match. The model's per-team totals ranged 778–1171, a 50% relative distortion between clubs with no football in it.","Rescaled within club, capped at 90 per player"],
+          ["Promoted sides had no parameters","No match history ⇒ att = dfn = 0, which reads as an average Premier League team. Over four promotion cohorts the model over-rated promoted attacks by 0.25 goals a game (p = 0.013).","Log-scale offset, −27.6% attack RMSE leave-one-season-out"],
+          ["Ipswich Town ≠ Ipswich","A name mismatch between the fixture table and the match archive threw away their 2024/25 season and treated them as a brand-new club.","Aliased"],
+          ["Two scoring terms missing","game_config carries penalties_missed −2 and red_cards −3. Neither was in the projection; the penalty term lands only on takers, who were being credited the upside of the same penalties.","Added"],
+        ]} />
+        <MtNote>Honest accounting: replaying 2025/26 GW1–6, these corrections did <b>not</b> measurably improve player-level accuracy (Spearman 0.6835 → 0.6834, paired t on absolute error p = 0.58). That is expected — the 2025/26 snapshot's per-team minutes already summed to 956 of 990, so the validation season barely contains the defect being fixed, and only 3 of 20 clubs are affected by the promotion correction. What did improve is internal consistency: summed player xG against team λ went from 0.80 to 1.03 excluding promoted sides. The corrections are justified by the rules and the mechanism, not by a win on the replay.</MtNote>
+      </MtCollapse>
+      <MtCollapse title="2.9 — Where the model is blind" sub="read this before trusting a number">
+        <ul style={{ margin:"8px 0", paddingLeft:18, lineHeight:1.7 }}>
+          <li><b>Coventry, Hull and Ipswich Town</b> have no usable Premier League history. Their goal model is the official FDR and nothing else, and their players' per-90 rates are positional priors rather than their own. Summed player xG covers only 15–23% of those clubs' team λ. Anything the table says about them is a prior, not a forecast.</li>
+          <li><b>Bookmaker odds are not applied</b> in the deployed projections. The team backtest put 0.807 weight on the closing market for next-gameweek forecasts; none of that is in these numbers.</li>
+          <li><b>The player pool is a snapshot.</b> Registration runs to the September deadline, so squads are incomplete and nine clubs are flagged <MtO>xMINS ?</MtO> — their minutes could not be corrected in full.</li>
+          <li><b>Bonus is last season's realised rate</b>, so a player who out-performed his xG last season carries an inflated bonus estimate on top of a shrunk goal estimate.</li>
+        </ul>
+      </MtCollapse>
+
       <MtH>What this model doesn't do well</MtH>
       <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.7, marginBottom:10 }}>
         Stated plainly, because a model that only advertises its strengths is not much use.
       </div>
-      <MtCollapse title="It barely beats a naive baseline on raw accuracy" sub="measured, not assumed">
-        <div>Replaying the whole pipeline on a past season and scoring it against what actually happened, <b style={{color:"#fff"}}>"last season's total points" — one column already in the API — ranked players slightly better</b> (Spearman 0.805 against 0.791).</div>
-        <div style={{ marginTop:8 }}>The model's edge shows up only in the top 10–20 of the ranking, which is where squad selection happens, but a bootstrap put the probability that edge is real at just <MtO>0.69</MtO>. It is not statistically established. The honest use is as a <b>blend</b> with the simple baseline, not a replacement for it.</div>
+      <MtCollapse title="It does not beat a naive baseline on ranking" sub="measured, not assumed">
+        <div>Replaying the pipeline on 2025/26 GW1–6 and scoring against what actually happened, <b style={{color:"#fff"}}>"last season's total points" — one column already in the API — ranked players better than the model</b> (Spearman 0.713 against 0.683).</div>
+        <div style={{ marginTop:8 }}>The model earns its keep only at the very top of the table, where selection happens: its top 20 returned 621 points against the naive top 20's 598. Blending the two at 0.35/0.65 beat both (Spearman 0.718, 8 of the true top 20 against 7 either way, 624 points). That blend is the <MtO>BLEND</MtO> column — sort by it as a second opinion.</div>
+        <MtNote>One season of replay is one observation. Treat the blend as a tilt, not a result.</MtNote>
       </MtCollapse>
       <MtCollapse title="Expected minutes is the binding constraint" sub="and there is a hard ceiling on it">
         <div>The team sheet arrives about an hour <b>after</b> the deadline. Every deadline-time minutes model is estimating something that becomes observable immediately after it stops being actionable. That is a structural feature of the game, not a modelling failure — and it is why commercial services with human curation of press conferences retain an edge on low-return players.</div>
@@ -2395,6 +2419,7 @@ export default function App() {
         if (sortBy === "md1")        return mdScore(b, 1).pts - mdScore(a, 1).pts;
         if (sortBy === "md2")        return mdScore(b, 2).pts - mdScore(a, 2).pts;
         if (sortBy === "xmins")      return (b.E_mins||0) - (a.E_mins||0);
+        if (sortBy === "blend")      return (b.blend_z||0) - (a.blend_z||0);
         if (sortBy === "intl")       return (b.intl_premium_score||0) - (a.intl_premium_score||0);
         return 0;
       });
