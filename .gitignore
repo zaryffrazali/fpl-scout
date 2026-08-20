@@ -28,3 +28,6 @@ r-analytics/data/*.rds
 .Rhistory
 .RData
 r-analytics/data/intl_matches_incoming.csv
+
+# scratch: files the sandbox could not unlink
+_to_delete/
