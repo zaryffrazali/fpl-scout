@@ -682,30 +682,33 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
 
 // ─── SQUAD OPTIMISER (shared by Fantasy XI and Squad Strategies) ───────────────
 // FPL squad selection is a multi-dimensional knapsack: 15 players, 2/5/5/3, £100.0m,
-// at most 3 per club, 11 of them starting in a legal formation.
+// at most 3 per club, 11 starting in a legal formation.
 //
-// The previous builder filled positions in the fixed order GK → DEF → MID → FWD, greedily
-// by points, reserving a flat minimum price per unfilled slot. Two things went wrong with
-// that. Forwards were chosen last, so by the time it looked at them the money was gone and
-// a £15.5m striker was rejected in EVERY formation. And the flat reserve was far too
-// pessimistic, so the XI finished about £17m under budget — it left value on the table and
-// then blamed the premium for being unaffordable.
+// The original builder filled positions in the fixed order GK → DEF → MID → FWD, greedily
+// by points, reserving a flat minimum price per unfilled slot. Forwards were priced last
+// with the money already gone, so a £15.5m striker was rejected in every formation while
+// the XI finished ~£17m under budget.
 //
-// This does three things instead: an exact lower bound on the money still to be spent
-// (the cheapest legal completion, not a per-slot guess), a seeded run for each expensive
-// candidate so premiums are evaluated on their merits, and a hill-climb over 1-swaps
-// (straight upgrade) and 2-swaps (upgrade one slot, downgrade another to pay for it).
-// The 2-swap is what actually buys a premium.
-const OPT_POS = ["GK", "DEF", "MID", "FWD"];
+// This uses an exact lower bound on the money still to be spent, a seeded run for each
+// expensive candidate so premiums are judged on their merits, a hill-climb over 1-swaps
+// (straight upgrade) and 2-swaps (upgrade one slot, downgrade another to pay for it), and
+// it only ever compares COMPLETE fifteens — an XI that cannot be completed to a legal squad
+// is discarded rather than reported.
+//
+// opts: spMin, candFilter, benchSpMin, benchMinPts, formations, minPriceCount {price, n}
 const FORMATIONS = [[3,4,3],[3,5,2],[4,3,3],[4,4,2],[4,5,1],[5,3,2],[5,4,1]];
+const OPT_POS = ["GK", "DEF", "MID", "FWD"];
 
+// Cheapest total cost of filling `need` from `byCheap`, skipping ids already used.
+// An exact lower bound on the money still to be spent — far tighter than slots x global-min,
+// which is what let the old builder finish an XI £17m under budget while rejecting a premium.
 function minRemainingCost(byCheap, need, used, team, maxClub) {
   let t = 0;
   for (const pos of OPT_POS) {
     let n = need[pos] || 0; if (!n) continue;
     for (const p of byCheap[pos]) {
       if (n <= 0) break;
-      if (used.has(p.id) || (team[p.team] || 0) >= maxClub) continue;
+      if (used.has(p.id) || (team[p.team]||0) >= maxClub) continue;
       t += p.price; n--;
     }
     if (n > 0) return Infinity;
@@ -714,79 +717,87 @@ function minRemainingCost(byCheap, need, used, team, maxClub) {
 }
 
 function greedyFill(cands, byCheap, need, budget, seed, maxClub) {
-  const chosen = [], team = {}, used = new Set(), left = { ...need };
+  const chosen = [], team = {}, used = new Set();
+  const left = { ...need };
   let cost = 0;
-  for (const sp of (seed || [])) {
-    if (!left[sp.pos]) return null;
-    chosen.push(sp); used.add(sp.id); team[sp.team] = (team[sp.team] || 0) + 1;
-    cost += sp.price; left[sp.pos]--;
+  for (const s of (seed || [])) {
+    if (!left[s.pos]) return null;
+    chosen.push(s); used.add(s.id); team[s.team] = (team[s.team]||0)+1; cost += s.price; left[s.pos]--;
   }
   if (cost > budget + 1e-9) return null;
   for (const pos of OPT_POS) {
     while (left[pos] > 0) {
       let picked = null;
       for (const p of cands[pos]) {
-        if (used.has(p.id) || (team[p.team] || 0) >= maxClub) continue;
+        if (used.has(p.id) || (team[p.team]||0) >= maxClub) continue;
         const after = { ...left }; after[pos]--;
         const nu = new Set(used); nu.add(p.id);
-        const nt = { ...team }; nt[p.team] = (nt[p.team] || 0) + 1;
+        const nt = { ...team }; nt[p.team] = (nt[p.team]||0)+1;
         if (cost + p.price + minRemainingCost(byCheap, after, nu, nt, maxClub) > budget + 1e-9) continue;
         picked = p; break;
       }
       if (!picked) return null;
-      chosen.push(picked); used.add(picked.id); team[picked.team] = (team[picked.team] || 0) + 1;
+      chosen.push(picked); used.add(picked.id); team[picked.team] = (team[picked.team]||0)+1;
       cost += picked.price; left[pos]--;
     }
   }
   return { chosen, cost, team, used };
 }
 
-function hillClimb(sol, cands, scoreFn, budget, maxClub) {
+// Hill-climb: 1-swaps (straight upgrade), then 2-swaps (upgrade one slot, downgrade another
+// to pay for it). The 2-swap is what actually buys a £15.5m striker.
+function hillClimb(sol, cands, scoreFn, budget, maxClub, need, keep) {
   let { chosen, cost, team, used } = sol;
+  // a structural constraint (e.g. "at least 3 players over £9.0m") must survive the hill-climb
+  const okKeep = arr => !keep || arr.filter(keep.test).length >= keep.n;
+  const score = a => a.reduce((s,p)=>s+scoreFn(p),0);
   for (let pass = 0; pass < 6; pass++) {
     let moved = false;
     for (let i = 0; i < chosen.length; i++) {
       const out = chosen[i];
       for (const inn of cands[out.pos]) {
-        if (scoreFn(inn) <= scoreFn(out)) break;          // sorted desc — nothing better remains
         if (used.has(inn.id)) continue;
-        if ((team[inn.team] || 0) - (inn.team === out.team ? 1 : 0) >= maxClub) continue;
+        if (scoreFn(inn) <= scoreFn(out)) break;                    // sorted desc: nothing better left
+        const tc = (team[inn.team]||0) - (inn.team === out.team ? 1 : 0);
+        if (tc >= maxClub) continue;
         if (cost - out.price + inn.price > budget + 1e-9) continue;
+        if (!okKeep(chosen.map((c, k) => k === i ? inn : c))) continue;
         chosen[i] = inn; used.delete(out.id); used.add(inn.id);
-        team[out.team]--; team[inn.team] = (team[inn.team] || 0) + 1;
+        team[out.team]--; team[inn.team] = (team[inn.team]||0)+1;
         cost += inn.price - out.price; moved = true; break;
       }
     }
     for (let i = 0; i < chosen.length && !moved; i++) {
       const out = chosen[i];
       for (const inn of cands[out.pos]) {
+        if (used.has(inn.id)) continue;
         const gain = scoreFn(inn) - scoreFn(out);
         if (gain <= 0) break;
-        if (used.has(inn.id)) continue;
         const short = cost - out.price + inn.price - budget;
-        if (short <= 1e-9) continue;                       // affordable already; the 1-swap pass has it
+        if (short <= 1e-9) continue;                                 // handled by the 1-swap pass
         let bestJ = -1, bestLoss = Infinity, bestRep = null;
         for (let j = 0; j < chosen.length; j++) {
           if (j === i) continue;
           const dOut = chosen[j];
           for (const dIn of cands[dOut.pos]) {
             if (used.has(dIn.id) || dIn.id === inn.id) continue;
-            if (dOut.price - dIn.price < short - 1e-9) continue;    // does not free enough
+            if (dOut.price - dIn.price < short - 1e-9) continue;      // does not free enough
             const loss = scoreFn(dOut) - scoreFn(dIn);
             if (loss >= gain || loss >= bestLoss) continue;
             const t2 = { ...team };
-            t2[out.team]--; t2[inn.team] = (t2[inn.team] || 0) + 1;
-            t2[dOut.team]--; t2[dIn.team] = (t2[dIn.team] || 0) + 1;
+            t2[out.team]--; t2[inn.team] = (t2[inn.team]||0)+1;
+            t2[dOut.team]--; t2[dIn.team] = (t2[dIn.team]||0)+1;
             if (t2[inn.team] > maxClub || t2[dIn.team] > maxClub) continue;
             bestJ = j; bestLoss = loss; bestRep = dIn;
           }
         }
+        if (bestJ >= 0 && !okKeep(chosen.map((c, k) => k === i ? inn : (k === bestJ ? bestRep : c)))) bestJ = -1;
         if (bestJ >= 0) {
           const dOut = chosen[bestJ];
           chosen[i] = inn; chosen[bestJ] = bestRep;
           used.delete(out.id); used.delete(dOut.id); used.add(inn.id); used.add(bestRep.id);
-          team[out.team]--; team[inn.team] = (team[inn.team] || 0) + 1;
-          team[dOut.team]--; team[bestRep.team] = (team[bestRep.team] || 0) + 1;
+          team[out.team]--; team[inn.team] = (team[inn.team]||0)+1;
+          team[dOut.team]--; team[bestRep.team] = (team[bestRep.team]||0)+1;
           cost += inn.price - out.price + bestRep.price - dOut.price;
           moved = true; break;
         }
@@ -794,54 +805,23 @@ function hillClimb(sol, cands, scoreFn, budget, maxClub) {
     }
     if (!moved) break;
   }
-  return { chosen, cost, team, used, pts: chosen.reduce((a, p) => a + scoreFn(p), 0) };
+  return { chosen, cost, team, used, pts: score(chosen) };
 }
 
-function optimiseSquad(pool, scoreFn, opts = {}) {
-  const budget = opts.budget ?? 100, maxClub = opts.maxClub ?? 3, anchorN = opts.anchors ?? 12;
-  const narrowed = (pool || []).filter(p => p.price > 0 && (!opts.candFilter || opts.candFilter(p)));
-  const elig = narrowed.length >= 30 ? narrowed : (pool || []).filter(p => p.price > 0);
-  if (elig.length < 15) return null;
-  const starters = elig.filter(p => !opts.spMin || (p.startProb || 0) >= opts.spMin);
-  const cands = {}, byCheap = {};
+function fillBench(benchNeed, byCheap, cands, scoreFn, state, budget, maxClub) {
+  const bench = [], team = { ...state.team }, used = new Set(state.used);
+  let cost = state.cost;
   for (const pos of OPT_POS) {
-    cands[pos] = starters.filter(p => p.pos === pos).sort((a, b) => scoreFn(b) - scoreFn(a));
-    if (cands[pos].length < 6) cands[pos] = elig.filter(p => p.pos === pos).sort((a, b) => scoreFn(b) - scoreFn(a));
-    const dependable = elig.filter(p => p.pos === pos && (p.startProb || 0) >= (opts.benchSpMin ?? 0.60)
-                                        && (p.pts_balanced || 0) >= (opts.benchMinPts ?? 6));
-    byCheap[pos] = (dependable.length >= 5 ? dependable : elig.filter(p => p.pos === pos))
-                     .slice().sort((a, b) => a.price - b.price);
-  }
-  let best = null;
-  for (const form of FORMATIONS) {
-    const [d, m, f] = form;
-    const need = { GK: 1, DEF: d, MID: m, FWD: f };
-    const benchNeed = { GK: 1, DEF: 5 - d, MID: 5 - m, FWD: 3 - f };
-    const reserve = minRemainingCost(byCheap, benchNeed, new Set(), {}, maxClub);
-    if (!isFinite(reserve)) continue;
-    const anchors = [null, ...starters.slice().sort((a, b) => b.price - a.price)
-                                      .slice(0, anchorN).filter(p => need[p.pos] > 0)];
-    for (const a of anchors) {
-      const s0 = greedyFill(cands, byCheap, need, budget - reserve, a ? [a] : null, maxClub);
-      if (!s0) continue;
-      const s = hillClimb(s0, cands, scoreFn, budget - reserve, maxClub);
-      if (!best || s.pts > best.pts) best = { ...s, form: `${d}-${m}-${f}`, dims: form, benchNeed };
-    }
-  }
-  if (!best) return null;
-  const bench = [], team = { ...best.team }, used = new Set(best.used);
-  let cost = best.cost;
-  for (const pos of OPT_POS) {
-    let n = best.benchNeed[pos] || 0;
+    let n = benchNeed[pos] || 0;
     for (const p of byCheap[pos]) {
       if (n <= 0) break;
       if (used.has(p.id) || (team[p.team] || 0) >= maxClub) continue;
       if (cost + p.price > budget + 1e-9) continue;
       bench.push(p); used.add(p.id); team[p.team] = (team[p.team] || 0) + 1; cost += p.price; n--;
     }
-    if (n > 0) return null;
+    if (n > 0) return null;                       // this XI cannot be completed to a legal 15
   }
-  for (let pass = 0; pass < 4; pass++) {                    // spend whatever is left on the bench
+  for (let pass = 0; pass < 4; pass++) {          // spend whatever is left upgrading the bench
     let moved = false;
     for (let i = 0; i < bench.length; i++) {
       const out = bench[i];
@@ -856,8 +836,75 @@ function optimiseSquad(pool, scoreFn, opts = {}) {
     }
     if (!moved) break;
   }
-  return { xi: best.chosen, bench, formation: best.form, dims: best.dims,
-           xiPts: best.pts, cost: +cost.toFixed(1) };
+  return { bench, cost, team, used };
+}
+
+function optimiseSquad(pool, scoreFn, opts = {}) {
+  const budget = opts.budget ?? 100, maxClub = opts.maxClub ?? 3, anchorN = opts.anchors ?? 12;
+  const forms = opts.formations || FORMATIONS;
+  const keep = opts.minPriceCount
+    ? { test: p => p.price >= opts.minPriceCount.price, n: opts.minPriceCount.n } : null;
+  const narrowed = (pool || []).filter(p => p.price > 0 && (!opts.candFilter || opts.candFilter(p)));
+  const elig = narrowed.length >= 30 ? narrowed : (pool || []).filter(p => p.price > 0);
+  if (elig.length < 15) return null;
+  const starters = elig.filter(p => !opts.spMin || (p.startProb || 0) >= opts.spMin);
+  const cands = {}, byCheap = {};
+  for (const pos of OPT_POS) {
+    cands[pos] = starters.filter(p => p.pos === pos).sort((a, b) => scoreFn(b) - scoreFn(a));
+    if (cands[pos].length < 6) cands[pos] = elig.filter(p => p.pos === pos).sort((a, b) => scoreFn(b) - scoreFn(a));
+    const dependable = elig.filter(p => p.pos === pos && (p.startProb || 0) >= (opts.benchSpMin ?? 0.60)
+                                        && (p.pts_balanced || 0) >= (opts.benchMinPts ?? 6));
+    byCheap[pos] = (dependable.length >= 5 ? dependable : elig.filter(p => p.pos === pos))
+                     .slice().sort((a, b) => a.price - b.price);
+  }
+  let best = null;
+  for (const form of forms) {
+    const [d, m, f] = form;
+    const need = { GK: 1, DEF: d, MID: m, FWD: f };
+    const benchNeed = { GK: 1, DEF: 5 - d, MID: 5 - m, FWD: 3 - f };
+    const reserve0 = minRemainingCost(byCheap, benchNeed, new Set(), {}, maxClub);
+    if (!isFinite(reserve0)) continue;
+    const premiums = keep ? starters.filter(keep.test).sort((a, b) => scoreFn(b) - scoreFn(a)) : [];
+    const seedSets = [];
+    if (keep) {
+      for (const head of premiums.slice(0, 6)) {
+        const set = [], tm = {}, room = { ...need };
+        for (const p of [head, ...premiums]) {
+          if (set.length >= keep.n) break;
+          if (set.includes(p) || !room[p.pos] || (tm[p.team] || 0) >= maxClub) continue;
+          set.push(p); room[p.pos]--; tm[p.team] = (tm[p.team] || 0) + 1;
+        }
+        if (set.length === keep.n) seedSets.push(set);
+      }
+      if (!seedSets.length) continue;
+    } else {
+      seedSets.push(null);
+      for (const a of starters.slice().sort((x, y) => y.price - x.price).slice(0, anchorN)) {
+        if (need[a.pos] > 0) seedSets.push([a]);
+      }
+    }
+    for (const seed of seedSets) {
+      // The bench reserve is only a lower bound: once the XI has taken players and filled
+      // clubs, the cheapest legal bench can cost more than the estimate. So try progressively
+      // larger reserves and keep the best COMPLETE 15 - never an XI that cannot be completed.
+      for (const pad of [0, 1.5, 3.5, 6.0, 10.0]) {
+        const s0 = greedyFill(cands, byCheap, need, budget - reserve0 - pad, seed, maxClub);
+        if (!s0) continue;
+        if (keep && s0.chosen.filter(keep.test).length < keep.n) continue;
+        const s = hillClimb(s0, cands, scoreFn, budget - reserve0 - pad, maxClub, need, keep);
+        const b = fillBench(benchNeed, byCheap, cands, scoreFn, s, budget, maxClub);
+        if (!b) continue;
+        if (!best || s.pts > best.pts) {
+          best = { xi: s.chosen, bench: b.bench, pts: s.pts, cost: +b.cost.toFixed(1),
+                   form: `${d}-${m}-${f}`, dims: form };
+        }
+        break;                                    // this seed is feasible; a bigger pad only hurts
+      }
+    }
+  }
+  if (!best) return null;
+  return { xi: best.xi, bench: best.bench, formation: best.form, dims: best.dims,
+           xiPts: best.pts, cost: best.cost };
 }
 
 // ─── TAB: STARTING XI (CSS pitch with positioned cards) ────────────────────────
@@ -1035,12 +1082,53 @@ function buildBalancedSquad(pool, scoreFn, spMin, opts = {}) {
 }
 function buildOptimalSquads(pool) {
   if (!pool || !pool.length) return { squads: null, meta: {} };
-  const scoutB = p => (p.own < 5 ? 3 : 0);   // differential tilt: reward sub-5%-owned picks
+  // Six strategies. Each is a different STRUCTURE — a different constraint set or a different
+  // objective — not the same ranking with a different threshold. The old set had Safe and
+  // Balanced returning identical squads, because pts_safe is pts_balanced x 0.72 and a
+  // monotone transform cannot reorder anything.
+  const X = p => p.pts_balanced || 0;
   const defs = {
-    safe:      { label: "Safe — Minutes Certainty", description: "Every pick projected at 72+ minutes a game and 90%+ to start, bench included. Ranks on the floor, not the mean. For people who put on a helmet when driving their car to work — this is Arteta-ball in fantasy mode.", objective: "max XI Σ pts_safe · xMins ≥ 72 · P(start) ≥ 0.90", score: p => p.pts_safe || 0, sp: 0.90, opts: { candFilter: p => (p.xm90 || 0) >= 72, benchSpMin: 0.85, benchMinPts: 8 } },
-    balanced:  { label: "Balanced — Core + Edge", description: "Best expected 3-gameweek points; every pick (incl. bench) is a real starter.", objective: "max XI Σ pts_balanced", score: p => p.pts_balanced || 0, sp: 0.75 },
-    diff:      { label: "Differential — Value Hunt", description: "Low-owned starters (<25%) with decent minutes & points, tilted toward scout-bonus picks.", objective: "max XI Σ (pts_balanced + scout-bonus EV) · own < 25%", score: p => (p.pts_balanced || 0) + scoutB(p), sp: 0.70, opts: { candFilter: p => p.own < 25, benchMinPts: 8 } },
-    psychopath:{ label: "Psychopath — Ceiling Chase", description: "Barely-owned attackers with the fattest right tail. Ranks on the P90 outcome, not the mean, so it will happily hand you a 4% -owned striker at a mid-table club over the template. High variance by construction — you either win the mini-league or you explain yourself in October.", objective: "max XI Σ pts_diff × scarcity × attacker tilt", score: p => (p.pts_diff || 0) * (p.own < 10 ? 1.3 : 1) * ((p.pos === "MID" || p.pos === "FWD") ? 1.15 : 1), sp: 0.70, opts: { candFilter: p => p.own < 35, benchMinPts: 7 } },
+    safe: {
+      label: "Safe — Minutes Certainty",
+      description: "Maximise points, but only over players the minutes model is confident in: 72+ projected minutes and 90%+ to start, bench included. You will never be the manager whose captain was benched.",
+      objective: "max XI Σ xPts  s.t.  xMins ≥ 72, P(start) ≥ 0.90",
+      score: X, sp: 0.90,
+      opts: { candFilter: p => (p.xm90 || 0) >= 72, benchSpMin: 0.85, benchMinPts: 8 },
+    },
+    balanced: {
+      label: "Balanced — Unconstrained Optimum",
+      description: "The most projected points a legal £100m squad can produce over GW1–GW3, with nothing else asked of it. Every other strategy is a constraint on this one, so the gap tells you what that constraint costs.",
+      objective: "max XI Σ xPts",
+      score: X, sp: 0.75,
+    },
+    stars: {
+      label: "Stars & Scrubs — Premium Heavy",
+      description: "At least three players at £9.0m+ in the XI, funded by bench fodder. The classic template bet: own the best assets outright and accept a thin bench.",
+      objective: "max XI Σ xPts  s.t.  ≥3 starters at £9.0m+",
+      score: X, sp: 0.70,
+      opts: { minPriceCount: { price: 9.0, n: 3 }, benchMinPts: 0, benchSpMin: 0.5 },
+    },
+    spread: {
+      label: "Spread — No Premiums",
+      description: "Nobody above £8.0m. The opposite structural bet to Stars & Scrubs: eleven good players instead of three great ones and a bench you cannot start.",
+      objective: "max XI Σ xPts  s.t.  price ≤ £8.0m",
+      score: X, sp: 0.75,
+      opts: { candFilter: p => p.price <= 8.0 },
+    },
+    diff: {
+      label: "Differential — Off Template",
+      description: "Nobody above 15% owned. Built to gain rank when it hits rather than to track the field, so it will look wrong most weeks by design.",
+      objective: "max XI Σ xPts  s.t.  ownership < 15%",
+      score: X, sp: 0.70,
+      opts: { candFilter: p => p.own < 15, benchMinPts: 7 },
+    },
+    ceiling: {
+      label: "Psychopath — Ceiling Chase",
+      description: "Maximises expected RETURNS — the number of matches in which a player scores or assists — instead of expected points. Different arithmetic, not a re-weighting: it buys goal threat and ignores the appearance and clean-sheet points that make the safe squads look good.",
+      objective: "max XI Σ P(goal or assist)",
+      score: p => p.model_haul || 0, sp: 0.70,
+      opts: { benchMinPts: 0, benchSpMin: 0.5 },
+    },
   };
   const squads = {}, meta = {};
   Object.entries(defs).forEach(([k, d]) => {
@@ -1050,6 +1138,7 @@ function buildOptimalSquads(pool) {
     squads[k] = sq;
     const xi = sq.filter(p => p.start);
     const tot = xi.reduce((s, p) => s + p.pts, 0), bud = sq.reduce((s, p) => s + p.price, 0);
+    const returns = r.chosen.filter(p => r.starterIds.has(p.id)).reduce((s, p) => s + (p.model_haul || 0), 0);
     const own = sq.length ? sq.reduce((s, p) => s + (p.own || 0), 0) / sq.length : 0;
     // the expensive players this objective decided not to buy — the answer to "where is X?"
     const inSquad = new Set(sq.map(p => p.id));
@@ -1058,6 +1147,7 @@ function buildOptimalSquads(pool) {
                         .map(p => ({ name: p.name, price: p.price, pts: Math.round((p.pts_balanced || 0) * 10) / 10, own: p.own }));
     meta[k] = { label: d.label, description: d.description + ` · ${r.form} · 3-gameweek xPts`, objective: d.objective, omitted,
       total_pts: Math.round(tot), budget: Math.round(bud * 10) / 10, avg_own: Math.round(own * 10) / 10,
+      returns: Math.round(returns * 10) / 10,
       n_scout: sq.filter(p => (p.own || 0) < 5).length, template_overlap_pct: Math.round(sq.filter(p => (p.own || 0) > 20).length / (sq.length || 1) * 100) };
   });
   return { squads, meta };
@@ -1072,14 +1162,14 @@ function OptimalSquadsTab({ squads, meta, mobile }) {
         const m = (meta && meta[key]) || {};
         return (
           <div key={key} style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:10, padding:"12px 14px" }}>
-            <div style={{ fontSize:14, fontWeight:800, color:"#fff", marginBottom:3, display:"flex", alignItems:"center", gap:6 }}>{key==="psychopath" && <img src="/img/makkauijau.png" alt="" className="mki-shake" style={{ height:24 }} />}{key==="safe" && <img src="/img/tucheliban.png" alt="tucheliban" title="tucheliban" className="mki-shake" style={{ height:28, width:28, borderRadius:"50%", objectFit:"cover" }} />}{m.label||key}</div>
+            <div style={{ fontSize:14, fontWeight:800, color:"#fff", marginBottom:3, display:"flex", alignItems:"center", gap:6 }}>{key==="ceiling" && <img src="/img/makkauijau.png" alt="" className="mki-shake" style={{ height:24 }} />}{key==="safe" && <img src="/img/tucheliban.png" alt="tucheliban" title="tucheliban" className="mki-shake" style={{ height:28, width:28, borderRadius:"50%", objectFit:"cover" }} />}{m.label||key}</div>
             <div style={{ fontSize:11, color:"#94a3b8", marginBottom:6, lineHeight:1.45 }}>{m.description||""}</div>
             <div style={{ fontSize:mobile?11:10, color:"#475569", fontFamily:MONO, marginBottom:8 }}>{m.objective||""}</div>
             <div style={{ display:"flex", flexWrap:"wrap", gap:10, fontSize:11, color:DIM, marginBottom:10, borderBottom:`1px solid ${BORDER}`, paddingBottom:8 }}>
               <span><b style={{color:TEXT}}>{m.total_pts??"—"}</b> XI pts</span>
               <span><b style={{color:TEXT}}>£{m.budget??"—"}m</b></span>
               <span>own <b style={{color:TEXT}}>{m.avg_own??"—"}%</b></span>
-              <span>scout <b style={{color:"#4ade80"}}>{m.n_scout??0}</b></span>
+              <span title="Expected number of matches across the XI in which a player scores or assists, over GW1–GW3. The ceiling metric.">returns <b style={{color:"#4ade80"}}>{m.returns??"—"}</b></span>
               <span>template <b style={{color:TEXT}}>{m.template_overlap_pct??"—"}%</b></span>
             </div>
             {!!(m.omitted && m.omitted.length) && (
