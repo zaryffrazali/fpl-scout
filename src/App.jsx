@@ -491,6 +491,11 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   {p.mispricing_flag==="UNDERRATED" && <Badge bg="#16a34a22" bd="#22c55e88" fg="#4ade80" title={`Value edge: +${(p.intl_premium_score||0).toFixed(2)}σ points per £m vs position. May be undervalued.`}>★ EDGE</Badge>}
                   {isFranPick(p) && <Badge bg="#1e3a8a44" bd="#3b82f6aa" fg="#93c5fd" title="FPL Fran's S-tier / best-by-position pick">👍 FRAN</Badge>}
                   {p.penTaker && <PenBadge/>}
+                  {typeof p.availability === "number" && p.availability < 1 && (
+                    <Badge bg={p.availability===0?"#7f1d1d33":"#78350f22"} bd={p.availability===0?"#ef444488":"#f59e0b88"}
+                      fg={p.availability===0?"#fca5a5":"#fcd34d"} title={p.news || "Flagged by the FPL API"}>
+                      {p.availability===0 ? "OUT" : `${Math.round(p.availability*100)}%`}
+                    </Badge>)}
                   {p.promoted_side && <Badge bg="#4c1d9522" bd="#a855f788" fg="#c4b5fd" title="Newly promoted: no Premier League match history to fit on, so this club's goal model rests entirely on the official FDR and its players' rates are positional priors rather than their own. Treat any projection here as a prior, not a forecast.">NEW TO PL</Badge>}
                   {p.minutes_confidence === "low" && <Badge bg="#78350f22" bd="#f59e0b88" fg="#fcd34d" title="This club's squad list in the snapshot is too short (or too long) for the minutes budget to be corrected in full, so expected minutes here are still under- or over-stated. Refresh the snapshot once the transfer window closes.">xMINS ?</Badge>}
                   {p.data_tier && p.data_tier!=="curated" && <Badge bg="#1e293b" bd="#334155" fg="#64748b" title="Prior-filled — stats from position/price priors (not hand-curated or FBref-matched). Lower confidence.">prior</Badge>}
