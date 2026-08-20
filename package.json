@@ -1,5 +1,5 @@
 {
-  "name": "wc2026-fantasy",
+  "name": "fpl-scout",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,10 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "build-squads": "node r-analytics/build_squads.cjs",
-    "fetch-lineups": "node r-analytics/lineups_fetch.cjs",
-    "fetch-apifootball-news": "node r-analytics/apifootball_news.cjs",
-    "fetch-news": "node r-analytics/news_fetch.cjs"
+    "refresh": "echo \"run: python3 ~/fpl/emit_players_json.py --gw N --horizon 3 --out public/data/players.json\""
   },
   "dependencies": {
     "react": "^19.2.6",

@@ -14,7 +14,11 @@ const TEAM_FLAG = {
   "New Zealand":"🇳🇿","Norway":"🇳🇴","Panama":"🇵🇦","Paraguay":"🇵🇾","Portugal":"🇵🇹","Qatar":"🇶🇦","Saudi Arabia":"🇸🇦",
   "Scotland":"🏴󠁧󠁢󠁳󠁣󠁴󠁿","Senegal":"🇸🇳","South Africa":"🇿🇦","South Korea":"🇰🇷","Spain":"🇪🇸","Sweden":"🇸🇪","Switzerland":"🇨🇭",
   "Tunisia":"🇹🇳","Turkey":"🇹🇷","United States":"🇺🇸","Uruguay":"🇺🇾","Uzbekistan":"🇺🇿" };
-const flagOf = (p) => TEAM_FLAG[p.team] || p.nat || "🏳️";
+const flagOf = (p) => p.team_code
+  ? <img src={`https://resources.premierleague.com/premierleague/badges/t${p.team_code}.png`}
+         alt={p.nat || ""} title={p.team || ""} loading="lazy"
+         style={{ height:16, width:16, verticalAlign:"-3px", objectFit:"contain" }} />
+  : (p.nat || "");
 // FPL Fran's S-tier / best-by-position picks — paste his selections here (full names, any case/accents).
 // Players matched here get a 👍 badge in the table. (Empty until the picks are provided.)
 const FRAN_PICKS = [
@@ -38,7 +42,7 @@ function computePrediction(p, riskMode) {
   let xA = (p.xAp90 || 0) * rm[1] * fm;
   if (typeof p.intl_premium_xG === "number") xG *= 1 + p.intl_premium_xG * 0.3; // model adj
 
-  // per-matchday fixture difficulty (MD1/MD2/MD3 weighted equally)
+  // per-gameweek fixture difficulty (GW1/GW2/GW3 weighted equally)
   let csP = 0, goalP = 0;
   fx.forEach((f) => { csP += f.oddsWin * 0.72 + f.oddsDraw * 0.28; goalP += f.oddsWin * 1.4 + f.oddsDraw * 0.5; });
   csP = fx.length ? csP / fx.length : (p.csP || 0.3);
@@ -47,8 +51,8 @@ function computePrediction(p, riskMode) {
   const sp = p.startProb ?? 0.85;
   const E_mins = sp * (p.minsIfStarted ?? 90);
 
-  // SINGLE ENGINE: group-stage base = sum of the three per-matchday projections (mdScore).
-  // This guarantees xPTS·GS === MD1 + MD2 + MD3 — no hidden adjustments baked into the headline.
+  // SINGLE ENGINE: 3-gameweek base = sum of the three per-gameweek projections (mdScore).
+  // This guarantees xPTS·3GW === GW1 + GW2 + GW3 — no hidden adjustments baked into the headline.
   let base = 0;
   for (let mi = 0; mi < 3; mi++) base += mdScore(p, mi).pts;
 
@@ -81,16 +85,17 @@ function mdScore(p, mi) {
   const csP = f.oddsWin * 0.72 + f.oddsDraw * 0.28, aMult = (f.oddsWin * 1.6 + f.oddsDraw * 0.5) / 1.1;
   // expected goals conceded after the 1st (−1 each) for GK/DEF — penalises leaky teams, not just rewards CS
   const gcPen = Math.max(0, f.oddsLoss * 2.0 + f.oddsDraw * 0.8 - 1);
-  let r = p.pos === "GK" ? csP * 5 + ((p.savesP90 || 3.2) / 3) - gcPen
-    : p.pos === "DEF" ? csP * 5 + xG * 7 * aMult + xA * 3 - gcPen
-    : p.pos === "MID" ? xG * 6 * aMult + xA * 3 + csP + (xA * 2.5 / 2) + 0.4
-    : xG * 5 * aMult + xA * 3 + (p.SoTp90 || 0) / 2;
+  // FPL 2026/27 scoring: goal GK 10 / DEF 6 / MID 5 / FWD 4; clean sheet GK 4 / DEF 4 / MID 1; assist 3
+  let r = p.pos === "GK" ? csP * 4 + ((p.savesP90 || 3.2) / 3) + xG * 10 * aMult - gcPen
+    : p.pos === "DEF" ? csP * 4 + xG * 6 * aMult + xA * 3 - gcPen
+    : p.pos === "MID" ? xG * 5 * aMult + xA * 3 + csP + (xA * 2.5 / 2) + 0.4
+    : xG * 4 * aMult + xA * 3 + (p.SoTp90 || 0) / 2;
   if (p.penTaker) r += 0.5; if (p.fkTaker) r += 0.4; if (p.cornerTaker) r += 0.3;
   r -= p.cardRisk === "high" ? 0.4 : p.cardRisk === "medium" ? 0.2 : 0;
   const mf = (p.startProb ?? 0.85) * (p.minsIfStarted ?? 90) / 90;
   return { pts: (p.startProb ?? 0.85) * 2 + r * mf, opp: f.opponent, win: f.oddsWin };
 }
-// model-implied anytime-scorer / anytime-assister probabilities for a player in matchday mi.
+// model-implied anytime-scorer / anytime-assister probabilities for a player in gameweek mi.
 // Poisson: P(≥1) = 1 − e^(−λ), where λ is the player's expected goals (μ for assists) THIS match —
 // xG/90 (role-, form-, premium-adjusted) × minutes share × the fixture's goal-context multiplier.
 function mdScorerProb(p, mi) {
@@ -106,7 +111,7 @@ function mdScorerProb(p, mi) {
 }
 // clean-sheet probability for a team given one of its fixtures (win/draw weighted, model-consistent)
 const csFromFixture = f => (f ? f.oddsWin * 0.72 + f.oddsDraw * 0.28 : 0);
-// "Next matchday" index from today's date (MD1 Jun11-15, MD2 Jun16-21, MD3 Jun22-27).
+// "Next gameweek" index from today's date (GW1 Jun11-15, GW2 Jun16-21, GW3 Jun22-27).
 function currentNextMd() {
   const t = new Date(), n = t.getFullYear() * 10000 + (t.getMonth() + 1) * 100 + t.getDate();
   return n < 20260616 ? 0 : n < 20260622 ? 1 : 2;
@@ -166,7 +171,7 @@ const ROLE_DEFS = [["pen","🎯 PEN"],["fk","🦶 FK"],["corner","📐 CORNER"],
   ["aerial","🛩 AERIAL THREAT"]];
 const SMART_PREDS = {
   // attacking starters who contribute a lot; the auto-set MD + "easy fixture" filter adds the
-  // high-win-probability-vs-weak-opponent half (switch MD via the Matchday dropdown).
+  // high-win-probability-vs-weak-opponent half (switch MD via the Gameweek dropdown).
   captainPicks:p=>p.startProb>=0.85 && (p.pts_balanced||0)>10 && (p.pos==="MID"||p.pos==="FWD"),
   scoutTargets:p=>p.own<5 && p.pts_balanced>10 && p.startProb>0.85,
   budgetBuilders:p=>p.price<=5.5 && (p.pts_balanced||0)>8 && (p.startProb||0)>0.70,
@@ -283,7 +288,7 @@ function FilterPanel({ F, setF, show, setShow, pool }) {
           </div>
           <div style={{ fontSize:9, letterSpacing:2, color:DIM, marginBottom:6 }}>FIXTURES</div>
           <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:12, alignItems:"center" }}>
-            <label style={{fontSize:11,color:DIM}}>Matchday <select value={F.md==null?"":F.md} onChange={e=>set("md",e.target.value===""?null:+e.target.value)} style={sel}><option value="">—</option><option value="0">MD1</option><option value="1">MD2</option><option value="2">MD3</option></select></label>
+            <label style={{fontSize:11,color:DIM}}>Gameweek <select value={F.md==null?"":F.md} onChange={e=>set("md",e.target.value===""?null:+e.target.value)} style={sel}><option value="">—</option><option value="0">GW1</option><option value="1">GW2</option><option value="2">GW3</option></select></label>
             {F.md!=null && <label style={{fontSize:11,color:DIM}}>Strength <select value={F.fixStr} onChange={e=>set("fixStr",e.target.value)} style={sel}><option value="all">All</option><option value="easy">Easy &gt;65%</option><option value="medium">Medium 40-65%</option><option value="hard">Hard &lt;40%</option></select></label>}
             <label style={{fontSize:11,color:DIM}}>Team style <select value={F.teamPlay} onChange={e=>set("teamPlay",e.target.value)} style={sel}><option>All</option>{CLUSTERS.map(c=><option key={c} value={c}>{c.replace(/_/g," ")}</option>)}</select></label>
             {F.md!=null && <label style={{fontSize:11,color:DIM}}>Opp style <select value={F.oppPlay} onChange={e=>set("oppPlay",e.target.value)} style={sel}><option>All</option>{CLUSTERS.map(c=><option key={c} value={c}>{c.replace(/_/g," ")}</option>)}</select></label>}
@@ -377,7 +382,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
       {mobile && <WatchlistBox players={allPlayers} watch={watch} toggleWatch={toggleWatch} onPick={(p)=>setSelected(p)} pickLabel="view" />}
       {/* sort hint + count (sorting now lives on the clickable column headers) */}
       <div style={{ display:"flex", alignItems:"center", borderBottom:`1px solid ${BORDER}`, padding:"6px 2px" }}>
-        <span style={{ fontSize:11, color:DIM }}>Tip: click any column header (xPTS·GS, VAL, MD1–3, OWN, TIER…) to sort high → low</span>
+        <span style={{ fontSize:11, color:DIM }}>Tip: click any column header (xPTS·3GW, VAL, GW1–3, OWN, TIER…) to sort high → low</span>
         <span style={{ marginLeft:"auto", fontSize:10, color:DIM, paddingRight:4 }}>{players.length>200?`top 200 of ${players.length}`:`${players.length} players`}</span>
       </div>
 
@@ -409,7 +414,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   <span style={{ color:"#94a3b8" }}>${p.price}m</span>
                   <span style={{ color:p.E_mins<60?"#eab308":"#94a3b8" }}>{Math.round(p.E_mins)}'</span>
                   <span style={{ color:p.displayPts>30?"#f97316":p.displayPts>20?"#22c55e":TEXT, fontWeight:700 }}>xPTS {p.displayPts.toFixed(1)}</span>
-                  <span style={{ color:"#7b8cde" }} title="MD1·MD2·MD3 xPts">MD {mdScore(p,0).pts.toFixed(0)}·{mdScore(p,1).pts.toFixed(0)}·{mdScore(p,2).pts.toFixed(0)}</span>
+                  <span style={{ color:"#7b8cde" }} title="GW1·GW2·GW3 xPts">MD {mdScore(p,0).pts.toFixed(0)}·{mdScore(p,1).pts.toFixed(0)}·{mdScore(p,2).pts.toFixed(0)}</span>
                   <span>Own {p.own}%</span>
                 </div>
               </div>
@@ -431,11 +436,11 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
           {SH("price","£")}
           {SH("xmins","xMIN")}
           {SH("role","ROLE","center","Role shift vs club role: attacking shifts (↑, e.g. DEF→ATT) rank first, defensive shifts (↓) last. Click to sort high → low.")}
-          {SH("displayPts","xPTS·GS","right","Group-stage xPts (sum of MD1–3) — same 3 games for every player")}
-          {SH("value","VAL","right","Value = group-stage xPts ÷ price ($m). Click to sort high → low.")}
-          {SH("md0","MD1","right","Projected xPts in Matchday 1")}
-          {SH("md1","MD2","right","Projected xPts in Matchday 2")}
-          {SH("md2","MD3","right","Projected xPts in Matchday 3")}
+          {SH("displayPts","xPTS·3GW","right","Group-stage xPts (sum of GW1–3) — same 3 games for every player")}
+          {SH("value","VAL","right","Value = 3-gameweek xPts ÷ price ($m). Click to sort high → low.")}
+          {SH("md0","GW1","right","Projected xPts in Gameweek 1")}
+          {SH("md1","GW2","right","Projected xPts in Gameweek 2")}
+          {SH("md2","GW3","right","Projected xPts in Gameweek 3")}
           {SH("intl","INTL σ","right","International premium (σ): how much a player out- or under-performs their CLUB output when playing for their COUNTRY — the model's mispricing signal. Positive = underrated vs price, negative = overrated. Click to sort high → low.")}
           {SH("own","OWN")}
           {SH("tier","TIER","center")}
@@ -479,7 +484,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
               <div title={`Predicted ${p.displayPts.toFixed(1)} pts (${riskMode}). Floor ${p.pts_median?.toFixed(1)} · ceiling ${p.pts_p90?.toFixed(1)}`}
                 style={{ textAlign:"right", fontSize:18, fontWeight:800, cursor:"help",
                 color:p.displayPts>30?"#f97316":p.displayPts>20?"#22c55e":TEXT }}>{p.displayPts.toFixed(1)}</div>
-              <div title={`${(p.value||0).toFixed(2)} group-stage xPts per $m`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color:p.value>3?"#f97316":p.value>2?"#22c55e":DIM }}>{(p.value||0).toFixed(1)}</div>
+              <div title={`${(p.value||0).toFixed(2)} 3-gameweek xPts per $m`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color:p.value>3?"#f97316":p.value>2?"#22c55e":DIM }}>{(p.value||0).toFixed(1)}</div>
               {[0,1,2].map(mi => { const ms = mdScore(p, mi); return (
                 <div key={mi} title={`MD${mi+1}${ms.opp?` vs ${ms.opp}`:""} — projected ${ms.pts.toFixed(1)} pts`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color: ms.pts>6?"#f97316":ms.pts>4?"#22c55e":DIM }}>{ms.pts.toFixed(1)}</div>
               ); })}
@@ -639,7 +644,7 @@ function StartingXITab({ pool, mobile }) {
 
   // centred spread: keeps lines balanced and puts a 2-man strikeforce central (≈39/61) not on the flanks
   const ROW = n => { if (!n) return []; const step = n>1 ? Math.min(22, 76/(n-1)) : 0; return Array.from({length:n}, (_,i)=> 50 + (i-(n-1)/2)*step); };
-  const score = (p, mi) => mdScore(p, mi);   // single shared per-matchday engine (no duplicate formula)
+  const score = (p, mi) => mdScore(p, mi);   // single shared per-gameweek engine (no duplicate formula)
   const benchReason = (p, mi) => {
     const wins=(p.fixtures||[]).map(f=>f?.oddsWin||0), bestMd=wins.indexOf(Math.max(...wins));
     if (bestMd>mi) return `Tough MD${mi+1} fixture — key MD${bestMd+1} asset`;
@@ -722,7 +727,7 @@ function StartingXITab({ pool, mobile }) {
           <input type="checkbox" checked={showDesc} onChange={e=>setShowDesc(e.target.checked)} style={{accentColor:"#f97316"}} /> Show descriptions
         </label>
       </div>
-      <div style={{ fontSize:12, color:DIM, marginBottom:6 }}>MD{md+1} — {MD_DATES[md]} | optimised for matchday {md+1} fixtures</div>
+      <div style={{ fontSize:12, color:DIM, marginBottom:6 }}>MD{md+1} — {MD_DATES[md]} | optimised for gameweek {md+1} fixtures</div>
       <div style={{ fontSize:12, color:"#fbbf24", marginBottom:4, fontWeight:600 }}>MD{md+1} CAPTAIN: {cap.name} vs {cap.opp} ({Math.round(cap.win*100)}% win prob)</div>
       <div style={{ fontSize:11, color:DIM, marginBottom:12 }}>Easiest fixtures: {fixCtx.map(x=>`${x.team} v ${x.opp} (${Math.round(x.win*100)}%)`).join(" · ")}</div>
       {mobile && <div style={{ fontSize:11, color:DIM, marginBottom:8 }}>Tap a player for detail · bench is below the pitch</div>}
@@ -773,7 +778,7 @@ function StartingXITab({ pool, mobile }) {
             </div>
             <div style={{ fontSize:11, color:DIM, margin:"4px 0" }}>{pl.team} · ${pl.price}m · {pl.pts_balanced} xPts · {pl.value} val</div>
             {showDesc && (() => {
-              const E = "3";   // group-stage scope (MD1–3)
+              const E = "3";   // 3-gameweek scope (GW1–3)
               const why = `MD${md+1} pick — ${Math.round(pl.mdWin*100)}% win vs ${pl.mdOpp}, ${pl.pts_balanced} xPts.`;
               const key = (pl.pos==="GK"||pl.pos==="DEF")
                 ? `Clean sheet prob ${Math.round((pl.csP||0)*100)}% → expected CS pts (adv ${pl.advP}%, ~${E} matches)`
@@ -876,7 +881,7 @@ function buildOptimalSquads(pool) {
   const scoutB = p => (p.own < 5 ? 3 : 0);   // scout-bonus tilt (FIFA: eligible only <5% owned)
   const defs = {
     safe:      { label: "Safe — Minutes Certainty", description: "Nailed-on starters only (start prob ≥ 0.80). Bench are the cheapest dependable starters, not passengers. For people who put on a helmet when driving their car to work — this is Arteta-ball in fantasy mode.", objective: "max XI Σ pts_safe", score: p => p.pts_safe || 0, sp: 0.80 },
-    balanced:  { label: "Balanced — Core + Edge", description: "Best expected group-stage points; every pick (incl. bench) is a real starter.", objective: "max XI Σ pts_balanced", score: p => p.pts_balanced || 0, sp: 0.75 },
+    balanced:  { label: "Balanced — Core + Edge", description: "Best expected 3-gameweek points; every pick (incl. bench) is a real starter.", objective: "max XI Σ pts_balanced", score: p => p.pts_balanced || 0, sp: 0.75 },
     diff:      { label: "Differential — Value Hunt", description: "Low-owned starters (<25%) with decent minutes & points, tilted toward scout-bonus picks.", objective: "max XI Σ (pts_balanced + scout-bonus EV) · own < 25%", score: p => (p.pts_balanced || 0) + scoutB(p), sp: 0.70, opts: { candFilter: p => p.own < 25, benchMinPts: 8 } },
     psychopath:{ label: "Psychopath — Giant-Killers", description: "Starters at underdog / giant-killer sides (Morocco, Japan, NZ…) who could pull an upset — high ceiling, barely owned. For absolutely fucking mentally ill people who should be locked up — but if things go right they'll win this shit.", objective: "max XI Σ pts_diff × giant-killer × scarcity", score: p => (p.pts_diff || 0) * (p.giant_killer_flag ? 2.2 : 1) * (p.own < 10 ? 1.3 : 1) * ((p.pos === "MID" || p.pos === "FWD") ? 1.15 : 1), sp: 0.70, opts: { candFilter: p => p.own < 35, benchMinPts: 7 } },
   };
@@ -889,7 +894,7 @@ function buildOptimalSquads(pool) {
     const xi = sq.filter(p => p.start);
     const tot = xi.reduce((s, p) => s + p.pts, 0), bud = sq.reduce((s, p) => s + p.price, 0);
     const own = sq.length ? sq.reduce((s, p) => s + (p.own || 0), 0) / sq.length : 0;
-    meta[k] = { label: d.label, description: d.description + ` · ${r.form} · group-stage xPts`, objective: d.objective,
+    meta[k] = { label: d.label, description: d.description + ` · ${r.form} · 3-gameweek xPts`, objective: d.objective,
       total_pts: Math.round(tot), budget: Math.round(bud * 10) / 10, avg_own: Math.round(own * 10) / 10,
       n_scout: sq.filter(p => (p.own || 0) < 5).length, template_overlap_pct: Math.round(sq.filter(p => (p.own || 0) > 20).length / (sq.length || 1) * 100) };
   });
@@ -1345,14 +1350,14 @@ function LineupsTab({ lineups, pool, goToPlayer, mobile, narrow, sel, setSel, cm
     const L = teamsData[t];
     if (!L) return { txt:"○ Not yet fetched", c:DIM };
     if (L.confidence==="SEED_DATA") return { txt:"🤖 AI predicted lineup — based on squad knowledge", c:"#60a5fa" };
-    return { txt:"🤖 AI predicted · updated manually before each matchday", c:"#60a5fa" };
+    return { txt:"🤖 AI predicted · updated manually before each gameweek", c:"#60a5fa" };
   };
   const status = statusFor(sel);
 
   return (
     <div>
       <div style={{ marginBottom:4, fontSize:16, fontWeight:800, color:"#fff" }}>📋 Predicted Lineups — WC2026</div>
-      <div style={{ fontSize:11, color:DIM, marginBottom:2 }}>AI squad-knowledge based · Updated manually before each matchday</div>
+      <div style={{ fontSize:11, color:DIM, marginBottom:2 }}>AI squad-knowledge based · Updated manually before each gameweek</div>
       <div style={{ fontSize:11, color:"#475569", marginBottom:12 }}>Last updated: {lineups.generated_at}</div>
 
       {/* prominent AI disclaimer (always shown) */}
@@ -1447,11 +1452,11 @@ function MethodTab({ analytics }) {
       <div style={{ background:CARD, borderLeft:`4px solid ${OR}`, borderRadius:8, padding:"16px 18px", marginBottom:14 }}>
         <div style={{ fontSize:10, letterSpacing:3, color:OR, marginBottom:8, fontFamily:MONO }}>TL;DR</div>
         <div style={{ fontSize:14.5, lineHeight:1.65, color:"#e2e8f0" }}>
-          WC26 SCOUT builds predicted fantasy points from the ground up — combining club-level performance stats, international role adjustments, betting market signals, and a causal model of tournament overperformance. <b style={{ color:"#fff" }}>Every number has a source. Every pick has a reason.</b>
-          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts is the <b style={{color:"#fff"}}>group stage (MD1–3)</b>, so everyone's compared over the same three games; <b style={{color:"#fff"}}>start probability is grounded in the predicted XIs</b>; tiers and the four optimal squads are recomputed on those numbers; and the new <b style={{color:"#fff"}}>Planner</b> (build your own XI) and <b style={{color:"#fff"}}>Odds</b> (scorer/assist/CS/win probabilities) tabs run entirely client-side.</div>
+          FPL SCOUT builds predicted fantasy points from the ground up — combining club-level performance stats, international role adjustments, betting market signals, and a causal model of tournament overperformance. <b style={{ color:"#fff" }}>Every number has a source. Every pick has a reason.</b>
+          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts is the <b style={{color:"#fff"}}>3-gameweek window (GW1–3)</b>, so everyone's compared over the same three games; <b style={{color:"#fff"}}>start probability is grounded in the predicted XIs</b>; tiers and the four optimal squads are recomputed on those numbers; and the new <b style={{color:"#fff"}}>Planner</b> (build your own XI) and <b style={{color:"#fff"}}>Odds</b> (scorer/assist/CS/win probabilities) tabs run entirely client-side.</div>
         </div>
         <div style={{ display:"flex", gap:8, marginTop:14, flexWrap:"wrap" }}>
-          {["group-stage xPts","lineup-grounded minutes","client-side tiers & squads"].map(t=>(
+          {["3-gameweek xPts","lineup-grounded minutes","client-side tiers & squads"].map(t=>(
             <span key={t} style={{ background:"#0a1322", border:`1px solid ${BORDER}`, borderRadius:20, padding:"6px 14px", fontSize:12, color:"#fff", fontWeight:600 }}>{t}</span>
           ))}
         </div>
@@ -1501,15 +1506,15 @@ function MethodTab({ analytics }) {
 E[appearance_pts]  = startProb × 2   (60+ min players)`}</MtFormula>
         <div><MtO>startProb</MtO> is <b style={{color:"#fff"}}>grounded in the AI-predicted starting XIs</b>: a predicted starter ≈ <MtO>0.90</MtO>, a named substitute ≈ <MtO>0.32</MtO>, anyone outside the predicted 15 ≈ <MtO>0.12</MtO>. This stops backup keepers and rotation players from inheriting a starter's points — fix a team's predicted XI and every player's xPts follows. (Players are matched to the lineup by <b>surname</b> to avoid first-name collisions.)</div>
       </MtCollapse>
-      <MtCollapse title="2.3 — Per-Matchday Fixture Difficulty" sub="MD1/MD2/MD3 separately">
-        <div>Difficulty is computed for each of the three group-stage matchdays, not a single FDR:</div>
+      <MtCollapse title="2.3 — Per-Gameweek Fixture Difficulty" sub="GW1/GW2/GW3 separately">
+        <div>Difficulty is computed for each of the three 3-gameweek gameweeks, not a single FDR:</div>
         <MtFormula>{`csP_md   = oddsWin × 0.72 + oddsDraw × 0.28
 goalP_md = oddsWin × 1.60 + oddsDraw × 0.50`}</MtFormula>
         <div>Clean-sheet probability scales with win probability (winners keep clean sheets). The 0.72 coefficient is calibrated against WC 2018 & 2022 data.</div>
         <div style={{ background:"#0a1322", border:`1px solid ${BORDER}`, borderRadius:6, padding:"10px 12px", marginTop:10, fontSize:12 }}>
-          <b style={{ color:OR }}>Worked example — Spain vs Cape Verde (MD1):</b><br/>
+          <b style={{ color:OR }}>Worked example — Spain vs Cape Verde (GW1):</b><br/>
           oddsWin = 0.91 → csP = 0.91×0.72 + 0.09×0.28 = <MtO>0.681</MtO><br/>
-          Spain defenders project a 68% clean-sheet probability in MD1 — worth <MtO>+3.4</MtO> expected pts from the clean sheet alone.
+          Spain defenders project a 68% clean-sheet probability in GW1 — worth <MtO>+3.4</MtO> expected pts from the clean sheet alone.
         </div>
       </MtCollapse>
       <MtCollapse title="2.4 — Role Shift Adjustment" sub="club role ≠ international role">
@@ -1531,9 +1536,9 @@ goalP_md = oddsWin × 1.60 + oddsDraw × 0.50`}</MtFormula>
           <li>Penalty taker: <MtO>+0.5</MtO> pts/match (pen win EV + conversion)</li>
         </ul>
       </MtCollapse>
-      <MtCollapse title="2.6 — Tournament Scale" sub="group stage only (MD1–3)">
-        <MtFormula>{`E[matches] = 3   (the three group-stage games — same for everyone)`}</MtFormula>
-        <div>xPts is currently scoped to the <b style={{color:"#fff"}}>group stage</b> so every player is compared over the same three games. We deliberately do <b>not</b> pre-credit a deep knockout run — the old <code>3 + advP/100 × 5</code> rule rewarded strong teams for matches they hadn't played yet and inflated their squads. Knockout games are added matchday-by-matchday as teams actually advance.</div>
+      <MtCollapse title="2.6 — Tournament Scale" sub="3-gameweek window only (GW1–3)">
+        <MtFormula>{`E[matches] = 3   (the three 3-gameweek games — same for everyone)`}</MtFormula>
+        <div>xPts is currently scoped to the <b style={{color:"#fff"}}>3-gameweek window</b> so every player is compared over the same three games. We deliberately do <b>not</b> pre-credit a deep knockout run — the old <code>3 + advP/100 × 5</code> rule rewarded strong teams for matches they hadn't played yet and inflated their squads. Knockout games are added gameweek-by-gameweek as teams actually advance.</div>
       </MtCollapse>
       <MtCollapse title="2.7 — Scorer / Assist Probabilities" sub="the Odds tab">
         <div>The Odds tab turns the same xG/xA into model-implied <b style={{color:"#fff"}}>anytime-scorer</b> and <b style={{color:"#fff"}}>anytime-assist</b> probabilities via a Poisson transform:</div>
@@ -1605,7 +1610,7 @@ P(≥1 assist) = 1 − e^(−μ),  μ = xA × minutes × fixture goal-context`}<
         <ul style={{ margin:0, paddingLeft:18 }}>
           <li>Total price ≤ <MtO>$100m</MtO></li>
           <li>Exactly <MtO>2 GK, 5 DEF, 5 MID, 3 FWD</MtO></li>
-          <li>Max <MtO>3 players per nation</MtO> (group stage)</li>
+          <li>Max <MtO>3 players per nation</MtO> (3-gameweek window)</li>
           <li>All selections binary (0/1)</li>
         </ul>
       </MtCollapse>
@@ -1614,7 +1619,7 @@ P(≥1 assist) = 1 − e^(−μ),  μ = xA × minutes × fixture goal-context`}<
         <div style={{ marginBottom:6 }}><b style={{color:"#fff"}}>Balanced (Core + Edge)</b> — max Σ pts_balanced across the XI.</div>
         <div style={{ marginBottom:6 }}><b style={{color:"#fff"}}>Differential (Value Hunt)</b> — low-owned (&lt;25%) starters with real minutes & points, tilted toward scout-bonus (&lt;5% owned) picks.</div>
         <div style={{ marginBottom:6 }}><b style={{color:"#fff"}}>Psychopath (Giant-Killers)</b> — starters at underdog / giant-killer sides (Morocco, Japan, NZ), maximising <code>pts_p90 × giant-killer × 1/(own+1)</code>.</div>
-        <MtNote>Recomputed client-side on the group-stage numbers via a budget-aware greedy (2 GK / 5 DEF / 5 MID / 3 FWD, ≤3 per nation, ≤$100m). Bench slots get the cheapest <b>dependable starters</b> (startProb ≥ 0.70, decent points) — never $3.5 passengers.</MtNote>
+        <MtNote>Recomputed client-side on the 3-gameweek numbers via a budget-aware greedy (2 GK / 5 DEF / 5 MID / 3 FWD, ≤3 per nation, ≤$100m). Bench slots get the cheapest <b>dependable starters</b> (startProb ≥ 0.70, decent points) — never $3.5 passengers.</MtNote>
       </MtCollapse>
       <MtCollapse title="5.4 — Why four squads?">
         <div>Strategy depends on your mini-league position. Leading? Play <b>Safe</b> — protect the lead. 10 points behind? Go <b>Differential</b> — you need variance. Starting fresh? <b>Balanced</b> is optimal for overall rank.</div>
@@ -1634,12 +1639,12 @@ P(≥1 assist) = 1 − e^(−μ),  μ = xA × minutes × fixture goal-context`}<
            − early_exit_penalty`}</MtFormula>
       <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.6 }}>The heaviest weight (<MtO>0.45</MtO>) goes to ceiling (pts_p90), not mean. The variance premium (<MtO>0.20</MtO>) explicitly rewards boom-or-bust players — in a mini-league a 2-or-20 player beats a steady 8.</div>
       <MtTable head={["Tier","Cutoff"]} rows={[["S","top 8%"],["A","next 17%"],["B","next 25%"],["C","next 25%"],["D","bottom 25%"]]} />
-      <MtNote>Re-derived client-side on the group-stage xPts so tiers match the rest of the dashboard. Hard rules: startProb &lt; 0.70 → cannot be S/A; advP &lt; 40% → cannot be S; own &gt; 55% → downgraded one tier; intl-premium &gt; 1.5σ AND own &lt; 10% → upgraded one tier.</MtNote>
+      <MtNote>Re-derived client-side on the 3-gameweek xPts so tiers match the rest of the dashboard. Hard rules: startProb &lt; 0.70 → cannot be S/A; advP &lt; 40% → cannot be S; own &gt; 55% → downgraded one tier; intl-premium &gt; 1.5σ AND own &lt; 10% → upgraded one tier.</MtNote>
 
       {/* SECTION 7 — Limitations */}
       <MtH>What this model doesn't do well</MtH>
       {[
-        ["1. In-tournament form is not yet incorporated","Pre-tournament stats are the only inputs. Once MD1 results are in, the model needs updating with actual tournament data. Live xG tracking is planned."],
+        ["1. In-tournament form is not yet incorporated","Pre-tournament stats are the only inputs. Once GW1 results are in, the model needs updating with actual tournament data. Live xG tracking is planned."],
         ["2. Friendly data is low signal","We use competitive internationals only (weighted 3×). Friendlies are included but heavily discounted."],
         ["3. Non-Big5 league coverage is weaker","Saudi Pro League, MLS, Liga MX, and African/Asian domestic leagues use manually estimated stats with lower confidence — flagged in player cards."],
         ["4. Injury news is not real-time","The newsfeed provides updates, but the xPts model does not auto-adjust for confirmed injuries. If a key player is injured, manually check startProb."],
@@ -1651,16 +1656,16 @@ P(≥1 assist) = 1 − e^(−μ),  μ = xA × minutes × fixture goal-context`}<
       <MtH>Recommended workflow</MtH>
       <ol style={{ paddingLeft:18, lineHeight:1.6, fontSize:13, color:"#cbd5e1" }}>
         <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Set your risk profile</b> — In Players, set risk by mini-league position. Behind → Differential. Ahead → Safe.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check the Causal tab first</b> — open the Causal tab → Teams to Attack section. Find the weakest defences facing your matchday; these are captain targets.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Use smart filters</b> — "MD1 Captain Picks" surfaces late-kickoff players with easy fixtures.</li>
+        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check the Causal tab first</b> — open the Causal tab → Teams to Attack section. Find the weakest defences facing your gameweek; these are captain targets.</li>
+        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Use smart filters</b> — "GW1 Captain Picks" surfaces late-kickoff players with easy fixtures.</li>
         <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check for mispricing</b> — "Role Arbitrage" finds players deployed more offensively internationally than their club price implies.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Validate with Lineups</b> — predicted lineups are generated by Claude using its knowledge of WC 2026 squads and typical national-team formations. They are updated manually before each matchday and represent the model's best assessment of likely starting XIs based on known squad compositions, injuries, and manager preferences. Confirm key picks are in the predicted XI; if DOUBT, consider alternatives.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check the News tab</b> — Check the 📡 News tab for the latest injury and lineup news before each matchday deadline. One late withdrawal can change your captain decision.</li>
+        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Validate with Lineups</b> — predicted lineups are generated by Claude using its knowledge of WC 2026 squads and typical national-team formations. They are updated manually before each gameweek and represent the model's best assessment of likely starting XIs based on known squad compositions, injuries, and manager preferences. Confirm key picks are in the predicted XI; if DOUBT, consider alternatives.</li>
+        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check the News tab</b> — Check the 📡 News tab for the latest injury and lineup news before each gameweek deadline. One late withdrawal can change your captain decision.</li>
         <li><b style={{color:"#fff"}}>Use Optimal Squads for budget</b> — Start from the Balanced squad, then swap in your differentials.</li>
       </ol>
 
       {/* SECTION 9 — About */}
-      <MtH>tucheliban's WC26 SCOUT</MtH>
+      <MtH>tucheliban's FPL SCOUT</MtH>
       <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.65 }}>
         Built for the 2026 FIFA World Cup. Combines fantasy football analytics with econometric methods usually reserved for academic research — regression analysis, causal inference, linear programming, and Monte Carlo simulation.
         <div style={{ marginTop:8, color:"#fff", fontWeight:600 }}>The goal: make every pick defensible with data.</div>
@@ -1707,16 +1712,16 @@ function GlobalCSS() {
 }
 
 const MATCHDAY_DEADLINES = [
-  { label: "MD1 Deadline", datetime: "2026-06-12T12:00:00-05:00" },
-  { label: "MD2 Deadline", datetime: "2026-06-20T09:00:00-05:00" },
-  { label: "MD3 Deadline", datetime: "2026-06-26T14:00:00-04:00" },
+  { label: "GW1 Deadline", datetime: "2026-06-12T12:00:00-05:00" },
+  { label: "GW2 Deadline", datetime: "2026-06-20T09:00:00-05:00" },
+  { label: "GW3 Deadline", datetime: "2026-06-26T14:00:00-04:00" },
   { label: "R32 Deadline", datetime: "2026-06-29T12:00:00-04:00" },
   { label: "R16 Deadline", datetime: "2026-07-05T12:00:00-04:00" },
   { label: "QF Deadline",  datetime: "2026-07-10T12:00:00-04:00" },
   { label: "SF Deadline",  datetime: "2026-07-14T12:00:00-04:00" },
   { label: "Final",        datetime: "2026-07-19T11:00:00-04:00" },
 ];
-const MD_FULL = { "MD1 Deadline":"Matchday 1", "MD2 Deadline":"Matchday 2", "MD3 Deadline":"Matchday 3",
+const MD_FULL = { "GW1 Deadline":"Gameweek 1", "GW2 Deadline":"Gameweek 2", "GW3 Deadline":"Gameweek 3",
   "R32 Deadline":"Round of 32", "R16 Deadline":"Round of 16", "QF Deadline":"Quarter-finals",
   "SF Deadline":"Semi-finals", "Final":"Final" };
 const pad2 = n => String(n).padStart(2, "0");
@@ -1763,7 +1768,7 @@ function DeadlineBanner({ mobile }) {
 function UrlBadge() {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    const t = "https://makscouthijau.uk";
+    const t = "https://fpl.makscouthijau.uk";
     (navigator.clipboard?.writeText(t) || Promise.reject())
       .then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })
       .catch(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
@@ -1773,7 +1778,7 @@ function UrlBadge() {
       style={{ background:"#0f172a", border:"1px solid #334155", color:"#94a3b8", borderRadius:20,
         padding:"4px 10px", fontSize:11, cursor:"pointer", whiteSpace:"nowrap", transition:"all .15s",
         fontFamily:MONO }}>
-      {copied ? "✓ copied!" : "🌐 makscouthijau.uk"}
+      {copied ? "✓ copied!" : "🌐 fpl.makscouthijau.uk"}
     </span>
   );
 }
@@ -1877,7 +1882,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   const benchPlayers = sp.filter(p => !starters.includes(p.id));
 
   // per-MD projected points — same model number the Players table shows (no flat scout bonus;
-  // scout upside is conditional, flagged by the 🔍 badge and already in the group-stage EV)
+  // scout upside is conditional, flagged by the 🔍 badge and already in the 3-gameweek EV)
   const ptsOf = (p, mi) => +mdScore(p, mi).pts.toFixed(1);
   const oppOf = (p, mi) => mdScore(p, mi).opp;
 
@@ -1999,7 +2004,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
       const download = () => { const a = document.createElement("a"); a.download = file.name; a.href = URL.createObjectURL(blob); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
       // mobile: open the share sheet (→ "Save to Photos"); desktop or unsupported: download to Files
       if (mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file], title: "WC26 Planner — my squad" }); }
+        try { await navigator.share({ files: [file], title: "FPL Planner — my squad" }); }
         catch (e) { if (e && e.name !== "AbortError") download(); }   // not a user-cancel → fall back
       } else { download(); }
     } catch (e) { alert("PNG export needs an internet connection to load the renderer.\n(" + e.message + ")"); }
@@ -2031,7 +2036,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   // ─ off-screen export node: all 3 MDs ─
   const ExportNode = () => (
     <div id="planner-export" style={{ position: "absolute", left: -99999, top: 0, width: 520, background: "#0d1829", padding: 18, fontFamily: SANS, color: TEXT }}>
-      <div style={{ fontSize: 16, fontWeight: 900, color: "#fff", marginBottom: 2 }}>WC26 SCOUT — My Squad</div>
+      <div style={{ fontSize: 16, fontWeight: 900, color: "#fff", marginBottom: 2 }}>FPL SCOUT — My Squad</div>
       <div style={{ fontSize: 10, color: DIM, marginBottom: 10 }}>Budget ${spent}m/{PL_BUDGET}m · {formationValid ? formationStr : "XI incomplete"}</div>
       {[0, 1, 2].map(mi => (
         <div key={mi} style={{ marginBottom: 12, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
@@ -2044,7 +2049,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
           ))}
         </div>
       ))}
-      <div style={{ fontSize: 9, color: DIM, marginTop: 4 }}>makscouthijau.uk · xP = model projection incl. scout bonus</div>
+      <div style={{ fontSize: 9, color: DIM, marginTop: 4 }}>fpl.makscouthijau.uk · xP = model projection incl. scout bonus</div>
     </div>
   );
 
@@ -2052,7 +2057,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     <div>
       {ExportNode()}
       <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", marginBottom: 2 }}>🧑‍💼 Team Planner</div>
-      <div style={{ fontSize: 11, color: DIM, marginBottom: 12 }}>Build a 15-man squad under ${PL_BUDGET}m · pick your XI + captain · plan transfers across matchdays · saved in your browser</div>
+      <div style={{ fontSize: 11, color: DIM, marginBottom: 12 }}>Build a 15-man squad under ${PL_BUDGET}m · pick your XI + captain · plan transfers across gameweeks · saved in your browser</div>
 
       {/* budget + squad status */}
       <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
@@ -2069,7 +2074,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
           <button onClick={exportPng} disabled={!starters.length || pngBusy} style={btn(false)}>{pngBusy ? "…rendering" : "📸 Save PNG (3 MDs)"}</button>
           <button onClick={() => { if (confirm("Clear your whole squad?")) { setSquad([]); setStarters([]); setCaptain(null); setViceCaptain(null); setTransfers(0); setPendingOut(0); setSubbingId(null); setMenuId(null); } }} style={{ ...btn(false), color: "#ff6b6b", borderColor: "#ef444455" }}>Clear</button>
         </div>
-        {squad.length >= 15 && <div style={{ fontSize: 11, color: DIM, marginTop: 8 }}>Transfers made: <b style={{ color: "#fff" }}>{transfers}</b> · 2 free/MD, then −4 each → projected hit <b style={{ color: transferHit ? "#ef4444" : "#4ade80" }}>−{transferHit}</b> · <button onClick={() => setTransfers(0)} style={{ background: "none", border: "none", color: "#f97316", cursor: "pointer", fontSize: 11, padding: 0 }}>reset (new matchday)</button></div>}
+        {squad.length >= 15 && <div style={{ fontSize: 11, color: DIM, marginTop: 8 }}>Transfers made: <b style={{ color: "#fff" }}>{transfers}</b> · 2 free/MD, then −4 each → projected hit <b style={{ color: transferHit ? "#ef4444" : "#4ade80" }}>−{transferHit}</b> · <button onClick={() => setTransfers(0)} style={{ background: "none", border: "none", color: "#f97316", cursor: "pointer", fontSize: 11, padding: 0 }}>reset (new gameweek)</button></div>}
       </div>
 
       {/* MD tabs + total */}
@@ -2216,7 +2221,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   );
 }
 
-// ─── TAB: ODDS (model-implied match + scorer/assist probabilities, MD1–3) ─────────
+// ─── TAB: ODDS (model-implied match + scorer/assist probabilities, GW1–3) ─────────
 function OddsTab({ pool, lineups, mobile }) {
   const [md, setMd] = useState(NEXT_MD);
   if (!pool || !pool.length) return <div style={{ color: DIM }}>No data.</div>;
@@ -2378,7 +2383,7 @@ export default function App() {
           q.pts_safe = +cp.pts_median.toFixed(1); q.pts_balanced = +cp.pts_mean.toFixed(1); q.pts_diff = +cp.pts_p90.toFixed(1);
           return q;
         });
-        // re-derive tier_score + tier letters (S/A/B/C/D) on the group-stage numbers, replacing the
+        // re-derive tier_score + tier letters (S/A/B/C/D) on the 3-gameweek numbers, replacing the
         // R pipeline's full-tournament tiers so the Tiers tab matches the rest of the dashboard
         const tierScoreOf = q => {
           const scoutEV = q.own < 5 ? 1.8 : 0;
@@ -2488,7 +2493,7 @@ export default function App() {
             </div>
             <div style={{ fontSize:mobile?20:24, fontWeight:900, letterSpacing:-1, color:"#fff" }}>
               <span style={{ fontSize:mobile?15:17, fontWeight:400, fontStyle:"italic", color:"#fff" }}>tucheliban's </span>
-              WC26 <span style={{ color:"#f97316" }}>SCOUT</span>
+              FPL <span style={{ color:"#f97316" }}>SCOUT</span>
             </div>
             <span style={{ fontSize:11, fontStyle:"italic", color:"#64748b" }}>it's coming home 🏴󠁧󠁢󠁥󠁮󠁧󠁿</span>
             <span style={{ marginLeft:"auto" }}><UrlBadge /></span>
