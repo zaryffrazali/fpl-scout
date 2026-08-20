@@ -1709,7 +1709,7 @@ function MethodTab({ analytics }) {
         <div style={{ fontSize:10, letterSpacing:3, color:OR, marginBottom:8, fontFamily:MONO }}>TL;DR</div>
         <div style={{ fontSize:14.5, lineHeight:1.65, color:"#e2e8f0" }}>
           FPL SCOUT builds expected points from the ground up. It does not regress on FPL points — it models each scoring event's probability and sums them, so the output is a distribution rather than a single number. <b style={{ color:"#fff" }}>Every number has a source. Every pick has a reason.</b>
-          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts covers <b style={{color:"#fff"}}>GW1–GW3</b>, so every player is compared over the same three fixtures. Fixture difficulty is not a rating — it is a parameter inside a fitted goal model. Expected minutes come from a model validated at <b style={{color:"#fff"}}>AUC 0.944</b>.</div>
+          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts covers <b style={{color:"#fff"}}>GW1–GW3</b>, so every player is compared over the same three fixtures. Fixture difficulty is not a rating — it is a parameter inside a fitted goal model. Expected minutes come from a model validated out of sample at <b style={{color:"#fff"}}>AUC 0.856</b>.</div>
         </div>
         <div style={{ display:"flex", gap:8, marginTop:14, flexWrap:"wrap" }}>
           {["Dixon-Coles goal model","fitted expected minutes","full points distribution"].map(t=>(
@@ -1757,9 +1757,10 @@ function MethodTab({ analytics }) {
       </MtCollapse>
       <MtCollapse title="2.2 — Expected minutes" sub="a fitted model, not a heuristic">
         <div>This is the single biggest driver of variance in FPL, so it is modelled rather than assumed. The problem is framed as supervised learning — pre-season state to realised early-season minutes — and trained on three seasons, 2,510 player-seasons:</div>
-        <MtFormula>{`P(nailed starter)   AUC 0.944
-expected minutes    RMSE 17.2 min/game  (target sd 32.0)`}</MtFormula>
+        <MtFormula>{`P(nailed starter)   AUC 0.856
+expected minutes    RMSE 25.0 min/game  (target sd 33.6)`}</MtFormula>
         <div>Validated leave-one-season-out, then isotonic-calibrated because the top decile over-predicted. Features are only what a pre-season snapshot contains: prior minutes and starts, price, price rank within club and position, ownership, availability flag, position.</div>
+        <MtNote><b>These numbers were 0.944 and 17.2 until an audit found the training set was leaking.</b> It paired each season's end-of-season snapshot with that same season's first six gameweeks, so the <code>minutes</code> feature contained the target — correlation exactly 1.0. Leave-one-season-out could not catch it, because the leak was inside each row rather than across rows. Rebuilt as prior-season totals → next-season GW1–6, the honest model explains about 45% of the variance in early-season minutes rather than 70%. Every figure elsewhere in this tab now comes from the clean harness.</MtNote>
         <MtNote>Players who joined a new club since June have their expected minutes shrunk 25% toward the positional median — last season's minutes were earned somewhere else, and their role is unproven.</MtNote>
       </MtCollapse>
       <MtCollapse title="2.3 — Fixture difficulty is not a rating" sub="it is a model parameter">
@@ -1821,10 +1822,17 @@ log λ_away = μ + att[away] − def[home]     + β·FDR`}</MtFormula>
       <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.7, marginBottom:10 }}>
         Stated plainly, because a model that only advertises its strengths is not much use.
       </div>
-      <MtCollapse title="It does not beat a naive baseline on ranking" sub="measured, not assumed">
-        <div>Replaying the pipeline on 2025/26 GW1–6 and scoring against what actually happened, <b style={{color:"#fff"}}>"last season's total points" — one column already in the API — ranked players better than the model</b> (Spearman 0.713 against 0.683).</div>
-        <div style={{ marginTop:8 }}>The model earns its keep only at the very top of the table, where selection happens: its top 20 returned 621 points against the naive top 20's 598. Blending the two at 0.35/0.65 beat both (Spearman 0.718, 8 of the true top 20 against 7 either way, 624 points). That blend is the <MtO>BLEND</MtO> column — sort by it as a second opinion.</div>
-        <MtNote>One season of replay is one observation. Treat the blend as a tilt, not a result.</MtNote>
+      <MtCollapse title="Its ranking edge does not convert into squad points" sub="three seasons, strictly out of sample">
+        <div>Refitting the whole pipeline before each season's GW1 deadline and scoring GW1–GW6 over 2023/24, 2024/25 and 2025/26 — the model ranks players significantly better than anything simple:</div>
+        <MtTable head={["Spearman vs realised GW1–6","all players","featured only","projected starters"]} rows={[
+          ["Model xPts","0.696","0.500","0.348"],
+          ["Template (most owned at GW1)","0.486","0.457","0.384"],
+          ["Last season's points","0.502","0.371","0.334"],
+          ["Price","0.499","0.313","0.324"],
+        ]} />
+        <div style={{ marginTop:8 }}>Paired on absolute error, pooled n = 1,964, that is <MtO>t = −5.63, p = 2 × 10⁻⁸</MtO> in the model's favour. But read across the row. <b style={{color:"#fff"}}>The advantage is almost entirely in knowing who plays.</b> Restricted to players the model already expects to start — the pool you actually pick from — ownership ranks better than the model does.</div>
+        <div style={{ marginTop:8 }}>So at squad level the two are indistinguishable. A pre-season XI picked by the model returned <MtO>313</MtO> points on average across the three seasons against the template's <MtO>322</MtO>, with the model holding the better floor (275 against 238). Perfect hindsight was 514; random was 114.</div>
+        <MtNote>Three seasons is three observations. The player-ranking result is established; the squad-level difference is not.</MtNote>
       </MtCollapse>
       <MtCollapse title="Expected minutes is the binding constraint" sub="and there is a hard ceiling on it">
         <div>The team sheet arrives about an hour <b>after</b> the deadline. Every deadline-time minutes model is estimating something that becomes observable immediately after it stops being actionable. That is a structural feature of the game, not a modelling failure — and it is why commercial services with human curation of press conferences retain an edge on low-return players.</div>
@@ -1845,6 +1853,19 @@ log λ_away = μ + att[away] − def[home]     + β·FDR`}</MtFormula>
         <div>This engine began as a World Cup fantasy model. When that tournament finished, its frozen pre-tournament predictions were scored against realised points.</div>
         <div style={{ marginTop:8 }}>It ordered players acceptably — the tiers separated cleanly and monotonically — but its point projections were <b style={{color:"#fff"}}>roughly 3× too high</b>, with 82% of players who featured finishing below what was billed as their floor. Nobody noticed for six weeks, because a scale error is invisible in a ranking.</div>
         <MtNote>Hence the rule here: check the levels, not just the ordering. Projections get scored against realised points once enough gameweeks exist to do it.</MtNote>
+      </MtCollapse>
+
+      <MtCollapse title="2.10 — What actually wins early gameweeks" sub="every lever, backtested over three seasons">
+        <div>Pre-season information is at its most valuable in exactly the window you want to attack. The same projection scored against later windows decays monotonically in all three seasons: <MtO>0.70</MtO> for GW1–6, <MtO>0.63</MtO> for GW7–12, <MtO>0.59</MtO> for GW13–18.</div>
+        <MtTable head={["Lever","Result","Verdict"]} rows={[
+          ["Constrain the squad","Unconstrained max-xPts had the best mean (313) AND the best floor (275). An xMins ≥ 60 gate cost 30 points; ownership ≥ 10% cost 19; a premium quota cost 25; a price cap cost 33.","Add no constraints"],
+          ["Bench weight","Ignoring the bench cost 23 points. Weighting it at 0.10 was the peak.","Weight the bench ~10%"],
+          ["Captaincy","The swing between the best and worst armband inside your own XI was 29–51 points over six gameweeks — as large as the entire spread between squad strategies.","Where your attention belongs"],
+          ["Captaincy rule","Captain your most expensive starter: 47 of a possible 49. The model's own pick: 38. Most-owned: 27.","Price beats the model here"],
+          ["Optimisation horizon","GW1 only / GW1–3 / GW1–6 scored 329 / 294 / 313 on the same realised window, each winning once.","Within noise — ignore"],
+          ["Money in the bank","£0–2m banked is free. Beyond that it costs ~3.5 points per £m over six gameweeks. Over GW1–8 only 6–7% of players rose at all and the biggest riser in three seasons was +£1.0m.","Spend it"],
+        ]} />
+        <MtNote>The money-in-the-bank result rules out banking for price rises. It says nothing about banking for <b>transfer flexibility</b> — the ability to make the move you want without downgrading elsewhere — which a static-squad backtest cannot price.</MtNote>
       </MtCollapse>
 
       <MtH>Recommended workflow</MtH>
