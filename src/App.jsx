@@ -441,7 +441,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
           {SH("md0","GW1","right","Projected xPts in Gameweek 1")}
           {SH("md1","GW2","right","Projected xPts in Gameweek 2")}
           {SH("md2","GW3","right","Projected xPts in Gameweek 3")}
-          {SH("intl","INTL σ","right","International premium (σ): how much a player out- or under-performs their CLUB output when playing for their COUNTRY — the model's mispricing signal. Positive = underrated vs price, negative = overrated. Click to sort high → low.")}
+          {SH("intl","VALUE σ","right","Value edge (σ): projected points per £m versus other players in the same position — the model's mispricing signal. Positive = underrated vs price, negative = overrated. Click to sort high → low.")}
           {SH("own","OWN")}
           {SH("tier","TIER","center")}
           <div style={{textAlign:"right"}}>FIX</div>
@@ -466,7 +466,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   {p.qualifyingForm==="EXCELLENT" && <Badge bg="#052e16" bd="#22c55e" fg="#86efac" title="Excellent qualifying form — 0.6+ goal contributions/game in recent competitive internationals.">QF ★★★</Badge>}
                   {p.qualifyingForm==="GOOD" && <Badge bg="#0a1f1c" bd="#22c55e88" fg="#4ade80" title="Good qualifying form — 0.3–0.6 goal contributions/game in recent competitive internationals.">QF ★★</Badge>}
                   {p.own<5 && <ScoutBadge/>}
-                  {p.mispricing_flag==="UNDERRATED" && <Badge bg="#16a34a22" bd="#22c55e88" fg="#4ade80" title={`Model edge: outperforms club stats internationally by +${(p.intl_premium_score||0).toFixed(2)}σ. May be undervalued.`}>★ EDGE</Badge>}
+                  {p.mispricing_flag==="UNDERRATED" && <Badge bg="#16a34a22" bd="#22c55e88" fg="#4ade80" title={`Value edge: +${(p.intl_premium_score||0).toFixed(2)}σ points per £m vs position. May be undervalued.`}>★ EDGE</Badge>}
                   {isFranPick(p) && <Badge bg="#1e3a8a44" bd="#3b82f6aa" fg="#93c5fd" title="FPL Fran's S-tier / best-by-position pick">👍 FRAN</Badge>}
                   {p.penTaker && <PenBadge/>}
                   {p.data_tier && p.data_tier!=="curated" && <Badge bg="#1e293b" bd="#334155" fg="#64748b" title="Prior-filled — stats from position/price priors (not hand-curated or FBref-matched). Lower confidence.">prior</Badge>}
@@ -579,7 +579,7 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
               {p.own<15 &&
                 <div style={{ marginTop:8, fontSize:11, color:"#fbbf24", fontWeight:700 }}>⚠ POTENTIAL MISPRICING</div>}
             </>
-          ) : <div style={{ fontSize:12, color:DIM }}>Club role consistent with international deployment.</div>}
+          ) : <div style={{ fontSize:12, color:DIM }}>No role change flagged — projections use this season's own per-90 rates.</div>}
         </div>
 
         {/* MODEL DEEP DIVE */}
@@ -593,9 +593,9 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
             {p.form_n>0 && <li>Intl form: <b style={{color:p.form_mult>1.05?"#4ade80":p.form_mult<0.95?"#ff6b6b":TEXT}}>×{p.form_mult}</b> (last {p.form_n} intl match{p.form_n>1?"es":""})</li>}
           </ul>
           {p.mispricing_flag==="UNDERRATED" &&
-            <div style={{ marginTop:8, fontSize:11, color:"#4ade80" }}>★ Model underprices: +{p.intl_premium_score?.toFixed(2)}σ intl premium</div>}
+            <div style={{ marginTop:8, fontSize:11, color:"#4ade80" }}>★ Model underprices: +{p.intl_premium_score?.toFixed(2)}σ value edge</div>}
           {p.mispricing_flag==="OVERRATED" &&
-            <div style={{ marginTop:8, fontSize:11, color:"#ff6b6b" }}>Model overprices: {p.intl_premium_score?.toFixed(2)}σ intl premium</div>}
+            <div style={{ marginTop:8, fontSize:11, color:"#ff6b6b" }}>Model overprices: {p.intl_premium_score?.toFixed(2)}σ value edge</div>}
         </div>
 
         {/* CAUSAL OUTLOOK */}
@@ -614,10 +614,10 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
           </div>
         )}
 
-        {/* INTERNATIONAL FORM (sparkline) */}
+        {/* RECENT FORM (sparkline) */}
         {p.form_n>0 && (
           <div style={{ background:"#0a121f", borderRadius:8, padding:"12px 14px" }}>
-            <div style={{ fontSize:9, letterSpacing:3, color:DIM, marginBottom:10 }}>INTERNATIONAL FORM</div>
+            <div style={{ fontSize:9, letterSpacing:3, color:DIM, marginBottom:10 }}>RECENT FORM</div>
             <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:8 }}>
               <Sparkline matches={p.formMatches}/>
               <span style={{ fontSize:18, fontWeight:800, color:p.form_mult>1.05?"#4ade80":p.form_mult<0.95?"#ff6b6b":TEXT }}>×{p.form_mult}</span>
@@ -969,7 +969,7 @@ function TiersTab({ tiers, pool, riskMode, posFilter, setPosFilter, pureDiff, se
           <span style={{ fontSize:11, color:DIM }}>${p.price}m · {band}</span>
           {isBest && <Badge bg="#3b2f0a" bd="#fbbf24" fg="#fbbf24" title="Highest tier score in this position + price band">BEST IN BAND</Badge>}
           {p.own<5 && <ScoutBadge/>}
-          {p.mispricing_flag==="UNDERRATED" && <Badge bg="#16a34a22" bd="#22c55e88" fg="#4ade80" title={`Model edge: +${(p.intl_premium_score||0).toFixed(2)}σ vs club stats`}>★ MODEL EDGE</Badge>}
+          {p.mispricing_flag==="UNDERRATED" && <Badge bg="#16a34a22" bd="#22c55e88" fg="#4ade80" title={`Value edge: +${(p.intl_premium_score||0).toFixed(2)}σ points per £m`}>★ MODEL EDGE</Badge>}
           {p.roleShift && p.roleShift!=="SAME" && <Badge bg="#f9731618" bd="#f9731688" fg="#f97316" title={`Role shift: ${p.roleShiftNote||p.roleShift}`}>↑ ROLE SHIFT</Badge>}
           {p.aerial_threat && <Badge bg="#0ea5e918" bd="#38bdf888" fg="#38bdf8" title={`Aerial threat — wins ${p.aerial_won_p90??"?"} aerials/90 at ${p.aerial_won_pct??"?"}% (club, FBref)`}>🛩 AERIAL</Badge>}
         </div>
@@ -1440,240 +1440,127 @@ const MtTable = ({ head, rows }) => (
 );
 
 function MethodTab({ analytics }) {
-  const flags = analytics?.player_analytics || [];
-  const under = flags.filter(p => p.mispricing_flag === "UNDERRATED").slice(0, 20);
-  const over  = flags.filter(p => p.mispricing_flag === "OVERRATED").slice(0, 20);
-  const sig = p => { const v = p.mispricing_z ?? p.intl_z ?? p.intl_residual_z; return v==null ? "" : `${v>0?"+":""}${Number(v).toFixed(1)}σ`; };
-  const Pill = ({ name, s, col }) => <span style={{ display:"inline-block", fontSize:11, background:CARD, border:`1px solid ${col}55`, color:"#e2e8f0", borderRadius:20, padding:"3px 10px", margin:3 }}>{name} {s && <b style={{ color:col }}>{s}</b>}</span>;
-
   return (
     <div style={{ maxWidth:800, margin:"0 auto", fontFamily:SANS }}>
-      {/* SECTION 0 — TL;DR */}
       <div style={{ background:CARD, borderLeft:`4px solid ${OR}`, borderRadius:8, padding:"16px 18px", marginBottom:14 }}>
         <div style={{ fontSize:10, letterSpacing:3, color:OR, marginBottom:8, fontFamily:MONO }}>TL;DR</div>
         <div style={{ fontSize:14.5, lineHeight:1.65, color:"#e2e8f0" }}>
-          FPL SCOUT builds predicted fantasy points from the ground up — combining club-level performance stats, international role adjustments, betting market signals, and a causal model of tournament overperformance. <b style={{ color:"#fff" }}>Every number has a source. Every pick has a reason.</b>
-          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts is the <b style={{color:"#fff"}}>3-gameweek window (GW1–3)</b>, so everyone's compared over the same three games; <b style={{color:"#fff"}}>start probability is grounded in the predicted XIs</b>; tiers and the four optimal squads are recomputed on those numbers; and the new <b style={{color:"#fff"}}>Planner</b> (build your own XI) and <b style={{color:"#fff"}}>Odds</b> (scorer/assist/CS/win probabilities) tabs run entirely client-side.</div>
+          FPL SCOUT builds expected points from the ground up. It does not regress on FPL points — it models each scoring event's probability and sums them, so the output is a distribution rather than a single number. <b style={{ color:"#fff" }}>Every number has a source. Every pick has a reason.</b>
+          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts covers <b style={{color:"#fff"}}>GW1–GW3</b>, so every player is compared over the same three fixtures. Fixture difficulty is not a rating — it is a parameter inside a fitted goal model. Expected minutes come from a model validated at <b style={{color:"#fff"}}>AUC 0.944</b>.</div>
         </div>
         <div style={{ display:"flex", gap:8, marginTop:14, flexWrap:"wrap" }}>
-          {["3-gameweek xPts","lineup-grounded minutes","client-side tiers & squads"].map(t=>(
+          {["Dixon-Coles goal model","fitted expected minutes","full points distribution"].map(t=>(
             <span key={t} style={{ background:"#0a1322", border:`1px solid ${BORDER}`, borderRadius:20, padding:"6px 14px", fontSize:12, color:"#fff", fontWeight:600 }}>{t}</span>
           ))}
         </div>
       </div>
 
-      {/* SECTION 1 — Data Sources */}
       <MtH>What data powers this</MtH>
-      <MtCollapse title="1.1 — Player Statistics" sub="FBref · worldfootballR">
-        <div>Source: <b>FBref</b> via the <code>worldfootballR</code> R package. Variables pulled per 90 minutes:</div>
+      <MtCollapse title="1.1 — The official FPL API" sub="the spine">
+        <div>Everything player-level comes from <code>fantasy.premierleague.com/api</code>, which now carries advanced stats natively:</div>
         <ul style={{ margin:"8px 0", paddingLeft:18 }}>
-          <li><MtO>npxG/90</MtO> — non-penalty expected goals</li>
-          <li><MtO>xAG/90</MtO> — expected assisted goals</li>
-          <li><MtO>SoT/90</MtO> — shots on target · <MtO>KP/90</MtO> — key passes · <MtO>TklW/90</MtO> — tackles won</li>
-          <li><MtO>Save%</MtO> and <MtO>SoTA/90</MtO> for goalkeepers · yellow/red card rates</li>
+          <li><MtO>expected_goals</MtO>, <MtO>expected_assists</MtO>, <MtO>expected_goals_conceded</MtO> — available since 2022/23</li>
+          <li><MtO>tackles</MtO>, <MtO>clearances_blocks_interceptions</MtO>, <MtO>recoveries</MtO>, <MtO>defensive_contribution</MtO> — since 2025/26</li>
+          <li><MtO>penalties_order</MtO>, direct free-kick and corner order — machine-readable set-piece duty</li>
+          <li>prices, ownership, availability flags and news timestamps</li>
         </ul>
-        <div>Coverage: Big 5 European leagues (EPL, La Liga, Bundesliga, Serie A, Ligue 1) + supplementary Understat. Season: <b>2025/26</b>.</div>
-        <MtNote>FBref rate limits mean some pulls use cached data. Players from non-Big5 leagues (Saudi Pro League, Liga MX, MLS) use manually seeded estimates flagged with lower confidence.</MtNote>
+        <MtNote>Scoring rules are read from <code>game_config.scoring</code> at runtime rather than hard-coded — they have changed twice in two seasons.</MtNote>
       </MtCollapse>
-      <MtCollapse title="1.2 — International Performance Data" sub="FBref national-team pages">
-        <div>Source: FBref national team pages via <code>worldfootballR</code>. Coverage: last <b>24 months</b> of international matches. Used to calibrate club stats to international context.</div>
-        <div style={{ marginTop:8 }}><b style={{color:"#fff"}}>Key insight:</b> a player's club xG/90 systematically over- or under-estimates their international output depending on role, team-quality differential, and playing style.</div>
+      <MtCollapse title="1.2 — Match history" sub="1,900 matches, five seasons">
+        <div>Team ratings are fitted on every Premier League match from 2021/22 to 2025/26, time-decayed. Historical per-gameweek data comes from the MIT-licensed <code>vaastav/Fantasy-Premier-League</code> archive.</div>
+        <MtNote>FBref is <b>not</b> used. Opta terminated Sports Reference's licence in January 2026 and the advanced data was deleted, so that route is closed for anything new.</MtNote>
       </MtCollapse>
-      <MtCollapse title="1.3 — Betting Market Signals" sub="The Odds API">
-        <div>We extract P(win)/P(draw)/P(loss) per fixture → clean-sheet probability; outright tournament odds → advancement probability; Golden Boot odds → forward-valuation cross-check.</div>
-        <div style={{ marginTop:8 }}>Betting markets aggregate injury news, squad depth, tactical matchups. We treat implied probabilities as <b>priors, not gospel</b> — where our model diverges from the market, that divergence is the signal.</div>
-        <div style={{ marginTop:8 }}><b style={{color:"#fff"}}>Vig removal:</b> we use Pinnacle (lowest-margin book) as the no-vig reference and normalise probabilities to sum to 1 across outcomes.</div>
-      </MtCollapse>
-      <MtCollapse title="1.4 — Tournament Structure" sub="OpenFootball">
-        <div>Source: <b>OpenFootball</b> (free GitHub JSON) — fixtures, groups, round schedules for all 48 teams. Used to compute expected matches per team given advancement probability.</div>
+      <MtCollapse title="1.3 — Bookmaker odds" sub="optional, and the strongest single input">
+        <div>When supplied, closing odds are de-vigged using <b>Shin's method</b> and solved jointly across the 1X2 and over/under markets for each side's expected goals. The published evidence is consistent that the closing market beats every statistical model on match outcomes.</div>
+        <div style={{ marginTop:8 }}>Because odds only exist a match or two ahead, the weight on the market <b style={{color:"#fff"}}>decays with horizon</b> — about 0.80 for the next gameweek, falling to near zero by GW+5, where the fitted goal model carries the projection instead.</div>
       </MtCollapse>
 
-      {/* SECTION 2 — Points model */}
       <MtH>How xPts is calculated</MtH>
-      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.6, marginBottom:6 }}>xPts is not a single number — it's a <b>distribution</b>. We report three versions: <MtO>Median</MtO> (safe floor), <MtO>Mean</MtO> (balanced), and <MtO>P90</MtO> (ceiling). The risk slider moves between them.</div>
-      <MtCollapse title="2.1 — Scoring Rules Implementation" sub="official FIFA fantasy scoring">
-        <MtTable head={["Position","Action","Pts"]} rows={[
-          ["GK","Clean sheet (60+ mins)","+5"],["GK","Goal scored","+9"],["GK","Penalty save","+3"],["GK","Every 3 saves","+1"],["GK","Each goal conceded after 1st","−1"],
-          ["DEF","Clean sheet","+5"],["DEF","Goal scored","+7"],["DEF","Each goal conceded after 1st","−1"],
-          ["MID","Goal scored","+6"],["MID","Every 2 chances created","+1"],["MID","Every 3 tackles","+1"],["MID","Clean sheet","+1"],
-          ["FWD","Goal scored","+5"],["FWD","Every 2 shots on target","+1"],
-          ["ALL","Appearance <60 mins","+1"],["ALL","Appearance 60+ mins","+2"],["ALL","Assist","+3"],["ALL","Yellow card","−1"],["ALL","Red card","−2"],["ALL","Scouting Bonus (>4pts, <5% owned)","+2"],
+      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.6, marginBottom:6 }}>xPts is not a single number — it is a <b>distribution</b>. Three versions are reported: <MtO>Median</MtO> (floor), <MtO>Mean</MtO> (balanced) and <MtO>P90</MtO> (ceiling). The risk slider moves between them.</div>
+      <MtCollapse title="2.1 — FPL 2026/27 scoring" sub="read from the API at runtime">
+        <MtTable head={["Action","GK","DEF","MID","FWD"]} rows={[
+          ["Goal scored","+10","+6","+5","+4"],
+          ["Assist","+3","+3","+3","+3"],
+          ["Clean sheet (60+ mins)","+4","+4","+1","—"],
+          ["Every 2 goals conceded","−1","−1","—","—"],
+          ["Every 3 saves","+1","—","—","—"],
+          ["Defensive contribution","—","+2","+2","+2"],
+          ["Appearance <60 / 60+ mins","+1 / +2","+1 / +2","+1 / +2","+1 / +2"],
+          ["Penalty save / miss","+5 / −2","−2","−2","−2"],
+          ["Yellow / red card","−1 / −3","−1 / −3","−1 / −3","−1 / −3"],
+          ["Bonus","1–3","1–3","1–3","1–3"],
         ]} />
+        <MtNote>Goalkeeper goals are worth 10 — unusual, and easy to miss. Defensive contribution is a capped 2 points at a hard threshold: 10 combined clearances, blocks, interceptions and tackles for defenders; 12 including ball recoveries for midfielders and forwards. Goalkeepers are not eligible.</MtNote>
       </MtCollapse>
-      <MtCollapse title="2.2 — Expected Minutes" sub="grounded in the predicted lineups">
-        <div>Every prediction is weighted by expected minutes:</div>
-        <MtFormula>{`E[mins]            = startProb × minsIfStarted
-E[appearance_pts]  = startProb × 2   (60+ min players)`}</MtFormula>
-        <div><MtO>startProb</MtO> is <b style={{color:"#fff"}}>grounded in the AI-predicted starting XIs</b>: a predicted starter ≈ <MtO>0.90</MtO>, a named substitute ≈ <MtO>0.32</MtO>, anyone outside the predicted 15 ≈ <MtO>0.12</MtO>. This stops backup keepers and rotation players from inheriting a starter's points — fix a team's predicted XI and every player's xPts follows. (Players are matched to the lineup by <b>surname</b> to avoid first-name collisions.)</div>
+      <MtCollapse title="2.2 — Expected minutes" sub="a fitted model, not a heuristic">
+        <div>This is the single biggest driver of variance in FPL, so it is modelled rather than assumed. The problem is framed as supervised learning — pre-season state to realised early-season minutes — and trained on three seasons, 2,510 player-seasons:</div>
+        <MtFormula>{`P(nailed starter)   AUC 0.944
+expected minutes    RMSE 17.2 min/game  (target sd 32.0)`}</MtFormula>
+        <div>Validated leave-one-season-out, then isotonic-calibrated because the top decile over-predicted. Features are only what a pre-season snapshot contains: prior minutes and starts, price, price rank within club and position, ownership, availability flag, position.</div>
+        <MtNote>Players who joined a new club since June have their expected minutes shrunk 25% toward the positional median — last season's minutes were earned somewhere else, and their role is unproven.</MtNote>
       </MtCollapse>
-      <MtCollapse title="2.3 — Per-Gameweek Fixture Difficulty" sub="GW1/GW2/GW3 separately">
-        <div>Difficulty is computed for each of the three 3-gameweek gameweeks, not a single FDR:</div>
-        <MtFormula>{`csP_md   = oddsWin × 0.72 + oddsDraw × 0.28
-goalP_md = oddsWin × 1.60 + oddsDraw × 0.50`}</MtFormula>
-        <div>Clean-sheet probability scales with win probability (winners keep clean sheets). The 0.72 coefficient is calibrated against WC 2018 & 2022 data.</div>
-        <div style={{ background:"#0a1322", border:`1px solid ${BORDER}`, borderRadius:6, padding:"10px 12px", marginTop:10, fontSize:12 }}>
-          <b style={{ color:OR }}>Worked example — Spain vs Cape Verde (GW1):</b><br/>
-          oddsWin = 0.91 → csP = 0.91×0.72 + 0.09×0.28 = <MtO>0.681</MtO><br/>
-          Spain defenders project a 68% clean-sheet probability in GW1 — worth <MtO>+3.4</MtO> expected pts from the clean sheet alone.
-        </div>
+      <MtCollapse title="2.3 — Fixture difficulty is not a rating" sub="it is a model parameter">
+        <div>There is no difficulty multiplier anywhere in the scoring path. Opponent strength enters <b style={{color:"#fff"}}>inside</b> a Dixon–Coles bivariate Poisson goal model:</div>
+        <MtFormula>{`log λ_home = μ + att[home] − def[away] + γ + β·FDR
+log λ_away = μ + att[away] − def[home]     + β·FDR`}</MtFormula>
+        <div>The opponent's defence rating is <b>subtracted from</b> your attack rating on the log scale, so it acts multiplicatively — already home/away split, already estimated with a standard error. Clean-sheet probability then falls out as <MtO>e^(−λ_opponent)</MtO> with the Dixon–Coles low-score correction applied.</div>
+        <div style={{ marginTop:8 }}>Fitted on 1,900 matches with a 210-day decay half-life and ridge shrinkage. The official FDR is included as a covariate, not as the metric — it carries genuine pre-season expert information about transfers and managerial change that a purely results-based model cannot see.</div>
+        <MtNote>Why this matters: P(clean sheet) is convex in opponent strength. A linear 1–5 difficulty scale is not, and the error runs to 11 percentage points through the middle of the range — around 0.46 points per match for a defender.</MtNote>
       </MtCollapse>
-      <MtCollapse title="2.4 — Role Shift Adjustment" sub="club role ≠ international role">
-        <div>Many players are priced on their club role but deployed differently for their country. We identify the gap and adjust:</div>
-        <MtTable head={["Role Shift","xG ×","xA ×","Rationale"]} rows={[
-          ["DEF_to_ATT","1.40","1.60","Attacking FB deployed as winger"],
-          ["MID_to_ATT","1.25","1.20","Deep mid given advanced freedom"],
-          ["WING_to_STRIKER","1.30","0.80","Winger used as false 9"],
-          ["MID_to_DEF","0.75","0.80","Creative mid in defensive role"],
-          ["ATT_to_DEF","0.60","0.70","Forward deployed deeper"],
-          ["SAME","1.00","1.00","Club role consistent"],
-        ]} />
-        <div><b style={{color:"#fff"}}>Example:</b> Kimmich plays DM/CM for Bayern but operates as an attacking RB for Germany. His club xA/90 understates his creative output — we apply <MtO>×1.60</MtO> to his xA.</div>
+      <MtCollapse title="2.4 — Non-linear terms are integrated, not approximated" sub="the detail most models get wrong">
+        <div>The goals-conceded penalty is −⌊n/2⌋, which is a step function. Evaluating it at the mean rather than over the distribution gives the wrong answer, sometimes dramatically:</div>
+        <MtFormula>{`E[−⌊N/2⌋]  = −0.610        summed over the distribution
+−⌊E[N]/2⌋  =  0.000        evaluated at the mean`}</MtFormula>
+        <div>Same logic governs the 60-minute appearance threshold, the defensive-contribution threshold and bonus. Every one is summed over its full distribution.</div>
       </MtCollapse>
-      <MtCollapse title="2.5 — Set Piece Bonuses" sub="undervalued dead-ball EV">
-        <ul style={{ margin:0, paddingLeft:18 }}>
-          <li>FK taker: <MtO>+0.4</MtO> pts/match (FK goal EV + bonus pt prob)</li>
-          <li>Corner taker: <MtO>+0.3</MtO> pts/match (indirect goal threat)</li>
-          <li>Penalty taker: <MtO>+0.5</MtO> pts/match (pen win EV + conversion)</li>
-        </ul>
-      </MtCollapse>
-      <MtCollapse title="2.6 — Tournament Scale" sub="3-gameweek window only (GW1–3)">
-        <MtFormula>{`E[matches] = 3   (the three 3-gameweek games — same for everyone)`}</MtFormula>
-        <div>xPts is currently scoped to the <b style={{color:"#fff"}}>3-gameweek window</b> so every player is compared over the same three games. We deliberately do <b>not</b> pre-credit a deep knockout run — the old <code>3 + advP/100 × 5</code> rule rewarded strong teams for matches they hadn't played yet and inflated their squads. Knockout games are added gameweek-by-gameweek as teams actually advance.</div>
-      </MtCollapse>
-      <MtCollapse title="2.7 — Scorer / Assist Probabilities" sub="the Odds tab">
-        <div>The Odds tab turns the same xG/xA into model-implied <b style={{color:"#fff"}}>anytime-scorer</b> and <b style={{color:"#fff"}}>anytime-assist</b> probabilities via a Poisson transform:</div>
-        <MtFormula>{`P(≥1 goal)   = 1 − e^(−λ),  λ = xG × minutes × fixture goal-context
-P(≥1 assist) = 1 − e^(−μ),  μ = xA × minutes × fixture goal-context`}</MtFormula>
-        <div>Shown alongside win/draw/loss and clean-sheet % per fixture. These are <b>model estimates, not bookmaker lines</b> — World Cup player-prop odds aren't sold on the cheap data feeds, so we derive them from the model (the more useful comparison anyway).</div>
+      <MtCollapse title="2.5 — Penalties are a role, not a skill" sub="separated from open play">
+        <div>The API's <code>expected_goals</code> includes penalties, so a designated taker's rate carries roughly 0.087 xG/90 that belongs to the <b>job</b> — and it stays attached to him after he loses it, while his replacement inherits nothing.</div>
+        <div style={{ marginTop:8 }}>The two halves are therefore treated differently: open play is a skill estimate and is shrunk toward the positional mean; the penalty term is a role and is not shrunk. Worth about <MtO>16.5 points a season</MtO>, and it moves with the job.</div>
       </MtCollapse>
 
-      {/* SECTION 3 — Regression */}
-      <MtH>Detecting mispricing with econometrics</MtH>
-      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.6, marginBottom:6 }}>Prices are set pre-tournament on club reputation and league form. International football differs — we use regression to quantify the gap.</div>
-      <MtCollapse title="3.1 — The Model" sub="8+ caps in last 24 months">
-        <MtFormula>{`intl_npxG_p90 = β₀ + β₁·club_npxG_p90 + β₂·league_tier
-              + β₃·role_shift + β₄·natl_team_elo + ε`}</MtFormula>
-        <div>The residual <MtO>ε</MtO> is the mispricing signal: positive → outperforms club stats internationally; negative → underperforms.</div>
-      </MtCollapse>
-      <MtCollapse title="3.2 — Interpretation" sub="z-score normalised">
-        <div>Residuals are normalised to a z-score: <MtO>+1.0σ</MtO> = one SD above expected international output.</div>
-        <ul style={{ margin:"8px 0", paddingLeft:18 }}>
-          <li>Above <MtO>+1.0σ</MtO> AND under 20% owned → <b style={{color:"#4ade80"}}>UNDERRATED</b></li>
-          <li>Below <MtO>−1.0σ</MtO> → <b style={{color:"#ff6b6b"}}>OVERRATED</b></li>
-        </ul>
-        <MtNote>With limited international data (WC is every 4 years), the regression uses qualifiers and friendlies as proxies. Competitive internationals (WC qualifying, Nations League, continental championships) are weighted 3× friendlies.</MtNote>
-      </MtCollapse>
-      <MtCollapse title="3.3 — Current flags" sub={`${under.length} under · ${over.length} over`} open={true}>
-        {under.length>0 ? <>
-          <div style={{ fontSize:11, letterSpacing:1, color:"#4ade80", marginBottom:4 }}>UNDERRATED</div>
-          <div style={{ marginBottom:10 }}>{under.map(p=><Pill key={p.id||p.name} name={p.name} s={sig(p)} col="#4ade80" />)}</div>
-        </> : <div style={{ color:DIM }}>No underrated flags in loaded analytics.</div>}
-        {over.length>0 && <>
-          <div style={{ fontSize:11, letterSpacing:1, color:"#ff6b6b", marginBottom:4 }}>OVERRATED</div>
-          <div>{over.map(p=><Pill key={p.id||p.name} name={p.name} s={sig(p)} col="#ff6b6b" />)}</div>
-        </>}
-        {!analytics && <div style={{ color:DIM }}>Run the R pipeline to populate analytics.json for live flags.</div>}
-      </MtCollapse>
-
-      {/* SECTION 4 — Causal */}
-      <MtH>Why some teams beat expectations</MtH>
-      <MtCollapse title="4.1 — The Two-Model Approach" sub="quality vs overperformance">
-        <div>We separate two questions most tools conflate: (1) how good is this team absolutely? (2) will it beat expectations? These have different predictors. France is strong but rarely massively overperforms — the market already prices them. <b>Overperformance is a property of underestimated teams.</b></div>
-      </MtCollapse>
-      <MtCollapse title="4.2 — Key Predictors" sub="WC 2006–2022 + continental panel">
-        <ol style={{ margin:0, paddingLeft:18, lineHeight:1.55 }}>
-          <li><b style={{color:"#4ade80"}}>Squad cohesion (shared caps) ↑</b> — Iceland 2016 averaged 47 caps/player, highest in the field.</li>
-          <li><b style={{color:"#4ade80"}}>Age profile (peak 26–29) ↑</b> — physical prime + experience; young squads overperform only with high cohesion.</li>
-          <li><b style={{color:OR}}>Foreign-league share (inverted-U)</b> — 60–80% is optimal; too low = limited exposure, too high = no shared tactical language.</li>
-          <li><b style={{color:"#4ade80"}}>Manager tenure ↑</b> — strongest in first 3 years, diminishing after.</li>
-          <li><b style={{color:"#4ade80"}}>Counter-defensive vs possession opponents ↑</b> — Morocco 2022, Iceland 2016, Greece 2004.</li>
-          <li><b style={{color:"#ff6b6b"}}>Narrative pressure ↓</b> — hosts / defending champions / heavily-hyped sides underperform; mechanism unclear.</li>
-        </ol>
-      </MtCollapse>
-      <MtCollapse title="4.3 — Historical Validation" sub="leave-one-out">
-        <MtTable head={["Team","Tournament","Pred OP","Actual OP","Verdict"]} rows={[
-          ["Iceland","Euro 2016","+1.8 rd","+2 rd","✓ Correct"],
-          ["Morocco","WC 2022","+1.5 rd","+2 rd","✓ Correct"],
-          ["Greece","Euro 2004","+2.1 rd","+3 rd","✓ Correct"],
-          ["Costa Rica","WC 2014","+1.2 rd","+2 rd","✓ Correct"],
-          ["Germany","WC 2018","−1.4 rd","−2 rd","✓ Correct"],
-        ]} />
-        <MtNote>Better calibrated for UEFA and CONMEBOL where more historical data exists. AFCON and AFC predictions carry lower confidence due to smaller samples.</MtNote>
-      </MtCollapse>
-
-      {/* SECTION 5 — LP */}
-      <MtH>Finding the mathematically optimal squad</MtH>
-      <MtCollapse title="5.1 — The Problem">
-        <div>Squad selection is a constrained optimisation: maximise predicted points subject to budget and structure constraints.</div>
-      </MtCollapse>
-      <MtCollapse title="5.2 — The Constraints">
-        <ul style={{ margin:0, paddingLeft:18 }}>
-          <li>Total price ≤ <MtO>$100m</MtO></li>
-          <li>Exactly <MtO>2 GK, 5 DEF, 5 MID, 3 FWD</MtO></li>
-          <li>Max <MtO>3 players per nation</MtO> (3-gameweek window)</li>
-          <li>All selections binary (0/1)</li>
-        </ul>
-      </MtCollapse>
-      <MtCollapse title="5.3 — Four Objective Functions" sub="same constraints, 4 objectives">
-        <div style={{ marginBottom:6 }}><b style={{color:"#fff"}}>Safe (Minutes Certainty)</b> — nailed starters only (startProb ≥ 0.80), max Σ pts_safe.</div>
-        <div style={{ marginBottom:6 }}><b style={{color:"#fff"}}>Balanced (Core + Edge)</b> — max Σ pts_balanced across the XI.</div>
-        <div style={{ marginBottom:6 }}><b style={{color:"#fff"}}>Differential (Value Hunt)</b> — low-owned (&lt;25%) starters with real minutes & points, tilted toward scout-bonus (&lt;5% owned) picks.</div>
-        <div style={{ marginBottom:6 }}><b style={{color:"#fff"}}>Psychopath (Giant-Killers)</b> — starters at underdog / giant-killer sides (Morocco, Japan, NZ), maximising <code>pts_p90 × giant-killer × 1/(own+1)</code>.</div>
-        <MtNote>Recomputed client-side on the 3-gameweek numbers via a budget-aware greedy (2 GK / 5 DEF / 5 MID / 3 FWD, ≤3 per nation, ≤$100m). Bench slots get the cheapest <b>dependable starters</b> (startProb ≥ 0.70, decent points) — never $3.5 passengers.</MtNote>
-      </MtCollapse>
-      <MtCollapse title="5.4 — Why four squads?">
-        <div>Strategy depends on your mini-league position. Leading? Play <b>Safe</b> — protect the lead. 10 points behind? Go <b>Differential</b> — you need variance. Starting fresh? <b>Balanced</b> is optimal for overall rank.</div>
-      </MtCollapse>
-
-      {/* SECTION 6 — Tiers */}
-      <MtH>How players are ranked for gambling play</MtH>
-      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.6, marginBottom:6 }}>The tier list answers a different question than xPts: not "who scores most on average" but "who gives the best chance of <b>winning my mini-league</b>".</div>
-      <MtFormula>{`tier_score = pts_p90 × 0.45
-           + (pts_p90 − pts_median) × 0.20
-           + scouting_bonus_ev × 0.15
-           + intl_premium_score × 0.10
-           + captain_slot_bonus × 0.05
-           + set_piece_involvement × 0.05
-           − card_risk_penalty
-           − start_uncertainty_penalty
-           − early_exit_penalty`}</MtFormula>
-      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.6 }}>The heaviest weight (<MtO>0.45</MtO>) goes to ceiling (pts_p90), not mean. The variance premium (<MtO>0.20</MtO>) explicitly rewards boom-or-bust players — in a mini-league a 2-or-20 player beats a steady 8.</div>
-      <MtTable head={["Tier","Cutoff"]} rows={[["S","top 8%"],["A","next 17%"],["B","next 25%"],["C","next 25%"],["D","bottom 25%"]]} />
-      <MtNote>Re-derived client-side on the 3-gameweek xPts so tiers match the rest of the dashboard. Hard rules: startProb &lt; 0.70 → cannot be S/A; advP &lt; 40% → cannot be S; own &gt; 55% → downgraded one tier; intl-premium &gt; 1.5σ AND own &lt; 10% → upgraded one tier.</MtNote>
-
-      {/* SECTION 7 — Limitations */}
       <MtH>What this model doesn't do well</MtH>
-      {[
-        ["1. In-tournament form is not yet incorporated","Pre-tournament stats are the only inputs. Once GW1 results are in, the model needs updating with actual tournament data. Live xG tracking is planned."],
-        ["2. Friendly data is low signal","We use competitive internationals only (weighted 3×). Friendlies are included but heavily discounted."],
-        ["3. Non-Big5 league coverage is weaker","Saudi Pro League, MLS, Liga MX, and African/Asian domestic leagues use manually estimated stats with lower confidence — flagged in player cards."],
-        ["4. Injury news is not real-time","The newsfeed provides updates, but the xPts model does not auto-adjust for confirmed injuries. If a key player is injured, manually check startProb."],
-        ["5. The regression has limited international data","WC qualification gives ~10 matches per team every 4 years. Individual residuals (mispricing flags) are directional signals, not precise estimates."],
-        ["6. Tactical changes mid-tournament","Managers adapt; a 4-3-3 may become 5-3-2 after a bad result. Role-shift flags are set pre-tournament and won't update mid-competition."],
-      ].map(([t,b])=> <MtCollapse key={t} title={t}>{b}</MtCollapse>)}
-
-      {/* SECTION 8 — Workflow */}
-      <MtH>Recommended workflow</MtH>
-      <ol style={{ paddingLeft:18, lineHeight:1.6, fontSize:13, color:"#cbd5e1" }}>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Set your risk profile</b> — In Players, set risk by mini-league position. Behind → Differential. Ahead → Safe.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check the Causal tab first</b> — open the Causal tab → Teams to Attack section. Find the weakest defences facing your gameweek; these are captain targets.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Use smart filters</b> — "GW1 Captain Picks" surfaces late-kickoff players with easy fixtures.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check for mispricing</b> — "Role Arbitrage" finds players deployed more offensively internationally than their club price implies.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Validate with Lineups</b> — predicted lineups are generated by Claude using its knowledge of WC 2026 squads and typical national-team formations. They are updated manually before each gameweek and represent the model's best assessment of likely starting XIs based on known squad compositions, injuries, and manager preferences. Confirm key picks are in the predicted XI; if DOUBT, consider alternatives.</li>
-        <li style={{ marginBottom:8 }}><b style={{color:"#fff"}}>Check the News tab</b> — Check the 📡 News tab for the latest injury and lineup news before each gameweek deadline. One late withdrawal can change your captain decision.</li>
-        <li><b style={{color:"#fff"}}>Use Optimal Squads for budget</b> — Start from the Balanced squad, then swap in your differentials.</li>
-      </ol>
-
-      {/* SECTION 9 — About */}
-      <MtH>tucheliban's FPL SCOUT</MtH>
-      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.65 }}>
-        Built for the 2026 FIFA World Cup. Combines fantasy football analytics with econometric methods usually reserved for academic research — regression analysis, causal inference, linear programming, and Monte Carlo simulation.
-        <div style={{ marginTop:8, color:"#fff", fontWeight:600 }}>The goal: make every pick defensible with data.</div>
+      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.7, marginBottom:10 }}>
+        Stated plainly, because a model that only advertises its strengths is not much use.
       </div>
-      <div style={{ fontSize:11, color:DIM, marginTop:14, lineHeight:1.7 }}>
-        Data: FBref · Understat · FIFA Fantasy API · The Odds API · OpenFootball<br/>
-        Model: R (worldfootballR, lpSolve, lme4, factoextra)<br/>
-        Frontend: React + Vite · Deployed on Cloudflare Pages
+      <MtCollapse title="It barely beats a naive baseline on raw accuracy" sub="measured, not assumed">
+        <div>Replaying the whole pipeline on a past season and scoring it against what actually happened, <b style={{color:"#fff"}}>"last season's total points" — one column already in the API — ranked players slightly better</b> (Spearman 0.805 against 0.791).</div>
+        <div style={{ marginTop:8 }}>The model's edge shows up only in the top 10–20 of the ranking, which is where squad selection happens, but a bootstrap put the probability that edge is real at just <MtO>0.69</MtO>. It is not statistically established. The honest use is as a <b>blend</b> with the simple baseline, not a replacement for it.</div>
+      </MtCollapse>
+      <MtCollapse title="Expected minutes is the binding constraint" sub="and there is a hard ceiling on it">
+        <div>The team sheet arrives about an hour <b>after</b> the deadline. Every deadline-time minutes model is estimating something that becomes observable immediately after it stops being actionable. That is a structural feature of the game, not a modelling failure — and it is why commercial services with human curation of press conferences retain an edge on low-return players.</div>
+      </MtCollapse>
+      <MtCollapse title="Deep-lying players are under-predicted" sub="measured, cause unknown">
+        <div>Players with high defensive volume for their position score about 1.8 points more per standard deviation over six gameweeks than projected (p = 0.020). Overdispersion in the defensive-contribution counts and bonus accrual have both been ruled out as the cause. This is an open problem, not a solved one.</div>
+      </MtCollapse>
+      <MtCollapse title="Other known approximations" sub="the honest list">
+        <ul style={{ margin:"8px 0", paddingLeft:18, lineHeight:1.7 }}>
+          <li>Bonus uses shrunk empirical per-90 means, not a within-fixture BPS rank simulation. Bonus is a rank statistic across all 22 players, which this does not model.</li>
+          <li>The squad optimiser has no covariance term, so it does not know when it is stacking correlated risk.</li>
+          <li>Defensive contribution is fitted on a single season, under a BPS regime that was retuned underneath it for 2026/27.</li>
+          <li>Team xG is not used. The columns exist from 2022/23 but are empty for that season's first 19 gameweeks, so usable history is too thin to fit on.</li>
+          <li>No chips, price changes, transfer economy, or double/blank gameweek handling yet.</li>
+        </ul>
+      </MtCollapse>
+      <MtCollapse title="A cautionary result from the predecessor" sub="why calibration is checked, not assumed">
+        <div>This engine began as a World Cup fantasy model. When that tournament finished, its frozen pre-tournament predictions were scored against realised points.</div>
+        <div style={{ marginTop:8 }}>It ordered players acceptably — the tiers separated cleanly and monotonically — but its point projections were <b style={{color:"#fff"}}>roughly 3× too high</b>, with 82% of players who featured finishing below what was billed as their floor. Nobody noticed for six weeks, because a scale error is invisible in a ranking.</div>
+        <MtNote>Hence the rule here: check the levels, not just the ordering. Projections get scored against realised points once enough gameweeks exist to do it.</MtNote>
+      </MtCollapse>
+
+      <MtH>Recommended workflow</MtH>
+      <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.8, marginBottom:12 }}>
+        1. <b style={{color:"#fff"}}>Players</b> — sort by xPTS·3GW, then sanity-check expected minutes. Anything under about 60 is a rotation risk regardless of how good the rate looks.<br/>
+        2. <b style={{color:"#fff"}}>Tiers</b> — the tier machinery was the most reliable component in the predecessor's validation. Trust the ordering more than the absolute numbers.<br/>
+        3. <b style={{color:"#fff"}}>Squad Strategies</b> — four objectives over the same constraints. Compare them rather than picking one.<br/>
+        4. <b style={{color:"#fff"}}>Planner</b> — build the XI by hand and see what the model thinks.<br/>
+        5. <b style={{color:"#fff"}}>Odds</b> — per-fixture scorer, assist and clean-sheet probabilities, straight from the goal model.
+      </div>
+
+      <MtH>tucheliban's FPL SCOUT</MtH>
+      <div style={{ fontSize:12, color:"#64748b", lineHeight:1.7 }}>
+        Data: official FPL API · vaastav/Fantasy-Premier-League (MIT) · optional bookmaker closing odds<br/>
+        Model: Python (Dixon–Coles, scikit-learn, SciPy MILP)<br/>
+        Frontend: React + Vite · deployed on Cloudflare Pages
       </div>
       <div style={{ textAlign:"right", fontSize:11, fontStyle:"italic", color:"#475569", marginTop:18 }}>it's coming home 🏴󠁧󠁢󠁥󠁮󠁧󠁿</div>
     </div>
@@ -1712,18 +1599,18 @@ function GlobalCSS() {
 }
 
 const MATCHDAY_DEADLINES = [
-  { label: "GW1 Deadline", datetime: "2026-06-12T12:00:00-05:00" },
-  { label: "GW2 Deadline", datetime: "2026-06-20T09:00:00-05:00" },
-  { label: "GW3 Deadline", datetime: "2026-06-26T14:00:00-04:00" },
-  { label: "R32 Deadline", datetime: "2026-06-29T12:00:00-04:00" },
-  { label: "R16 Deadline", datetime: "2026-07-05T12:00:00-04:00" },
-  { label: "QF Deadline",  datetime: "2026-07-10T12:00:00-04:00" },
-  { label: "SF Deadline",  datetime: "2026-07-14T12:00:00-04:00" },
-  { label: "Final",        datetime: "2026-07-19T11:00:00-04:00" },
+  { label: "GW1 Deadline",  datetime: "2026-08-21T17:30:00Z" },
+  { label: "GW2 Deadline",  datetime: "2026-08-28T17:30:00Z" },
+  { label: "GW3 Deadline",  datetime: "2026-09-04T17:30:00Z" },
+  { label: "GW4 Deadline",  datetime: "2026-09-12T12:30:00Z" },
+  { label: "GW5 Deadline",  datetime: "2026-09-18T17:30:00Z" },
+  { label: "GW6 Deadline",  datetime: "2026-10-10T10:00:00Z" },
+  { label: "GW7 Deadline",  datetime: "2026-10-17T10:00:00Z" },
+  { label: "GW8 Deadline",  datetime: "2026-10-23T17:30:00Z" },
+  { label: "GW9 Deadline",  datetime: "2026-10-31T11:00:00Z" },
+  { label: "GW10 Deadline", datetime: "2026-11-07T13:30:00Z" },
 ];
-const MD_FULL = { "GW1 Deadline":"Gameweek 1", "GW2 Deadline":"Gameweek 2", "GW3 Deadline":"Gameweek 3",
-  "R32 Deadline":"Round of 32", "R16 Deadline":"Round of 16", "QF Deadline":"Quarter-finals",
-  "SF Deadline":"Semi-finals", "Final":"Final" };
+const MD_FULL = Object.fromEntries(Array.from({length:10},(_,i)=>[`GW${i+1} Deadline`,`Gameweek ${i+1}`]));
 const pad2 = n => String(n).padStart(2, "0");
 
 function DeadlineBanner({ mobile }) {
@@ -1732,7 +1619,7 @@ function DeadlineBanner({ mobile }) {
   const next = MATCHDAY_DEADLINES.find(d => new Date(d.datetime).getTime() > now);
   const base = { display:"flex", alignItems:"center", justifyContent:"center", color:"#fff",
     fontFamily:SANS, borderBottom:`1px solid ${BORDER}` };
-  if (!next) return <div style={{ ...base, height: mobile?28:36, fontSize: mobile?12:14, fontWeight:700, background:"linear-gradient(90deg,#166534,#14532d)" }}>Tournament Complete 🏆</div>;
+  if (!next) return <div style={{ ...base, height: mobile?28:36, fontSize: mobile?12:14, fontWeight:700, background:"linear-gradient(90deg,#166534,#14532d)" }}>Season complete 🏆</div>;
   const ms = new Date(next.datetime).getTime() - now;
   const d = Math.floor(ms/86400000), h = Math.floor(ms/3600000)%24, m = Math.floor(ms/60000)%60, s = Math.floor(ms/1000)%60;
   const under24 = ms < 86400000, under1 = ms < 3600000;
@@ -1850,7 +1737,7 @@ const PL_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 };   // 15-man squad shape
 const PL_XI_MAX = { GK: 1, DEF: 5, MID: 5, FWD: 3 };   // max of each position in the starting XI
 const PL_BUDGET = 100;
 const PL_FORMS = [[3, 4, 3], [3, 5, 2], [4, 3, 3], [4, 4, 2], [4, 5, 1], [5, 3, 2], [5, 4, 1]];
-const PL_KEY = "wc26_planner_v1";
+const PL_KEY = "fpl_planner_v1";
 const PL_MD_DATES = ["Jun 11-15", "Jun 16-21", "Jun 22-27"];
 
 function PlannerTab({ pool, mobile, watch, toggleWatch }) {
@@ -2000,7 +1887,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
       const node = document.getElementById("planner-export");
       const canvas = await h2c(node, { backgroundColor: "#0d1829", scale: 2 });
       const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
-      const file = new File([blob], "wc26-planner-3mds.png", { type: "image/png" });
+      const file = new File([blob], "fpl-planner-gw1-3.png", { type: "image/png" });
       const download = () => { const a = document.createElement("a"); a.download = file.name; a.href = URL.createObjectURL(blob); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
       // mobile: open the share sheet (→ "Save to Photos"); desktop or unsupported: download to Files
       if (mobile && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2322,9 +2209,9 @@ export default function App() {
   const [lineups, setLineups] = useState(null);
   const [news, setNews] = useState(null);
   const [loadError, setLoadError] = useState(false);
-  const [watch, setWatch] = useState(() => { try { return JSON.parse(localStorage.getItem("wc26_watch") || "[]"); } catch { return []; } });
+  const [watch, setWatch] = useState(() => { try { return JSON.parse(localStorage.getItem("fpl_watch") || "[]"); } catch { return []; } });
   const toggleWatch = (id) => setWatch(w => w.includes(id) ? w.filter(x => x !== id) : [...w, id]);
-  useEffect(() => { try { localStorage.setItem("wc26_watch", JSON.stringify(watch)); } catch { /* private mode */ } }, [watch]);
+  useEffect(() => { try { localStorage.setItem("fpl_watch", JSON.stringify(watch)); } catch { /* private mode */ } }, [watch]);
   const [loading, setLoading] = useState(true);     // artificial 1s loader on open + every tab switch
   const [loaderFrame, setLoaderFrame] = useState(0);
   const { mobile, narrow } = useIsMobile();
@@ -2478,14 +2365,14 @@ export default function App() {
     </div>);
   if (!rawPlayers) return loaderOverlay;
 
-  const TABS = [["table","📊 Players"],["planner","🧑‍💼 Planner"],["xi","⚽ Fantasy XI"],["squads","🧮 Squad Strategies"],["lineups","📋 AI Predicted Starting XIs"],["news","📡 News"],["tiers","🏆 Tiers"],["odds","🎲 Odds"],["causal","🔮 Causal"],["method","🔬 Method"]];
+  const TABS = [["table","📊 Players"],["planner","🧑‍💼 Planner"],["xi","⚽ Fantasy XI"],["squads","🧮 Squad Strategies"],["tiers","🏆 Tiers"],["odds","🎲 Odds"],["method","🔬 Method"]];
   return (
     <div style={{ background:BG, minHeight:"100vh", color:TEXT, fontFamily:SANS, fontSize:mobile?14:13, fontVariantNumeric:"tabular-nums" }}>
       <GlobalCSS />
       {loading && loaderOverlay}
       <div style={{ background:"linear-gradient(135deg,#0d1829,#0a1020)", borderBottom:`1px solid ${BORDER}`, padding:mobile?"12px 12px 0":"16px 20px 0" }}>
         <div style={{ maxWidth:1240, margin:"0 auto" }}>
-          {!mobile && <div style={{ fontSize:9, letterSpacing:5, color:"#f97316", marginBottom:4, fontFamily:MONO }}>FIFA WORLD CUP 2026 · FANTASY ANALYTICS</div>}
+          {!mobile && <div style={{ fontSize:9, letterSpacing:5, color:"#f97316", marginBottom:4, fontFamily:MONO }}>PREMIER LEAGUE 2026/27 · FANTASY ANALYTICS</div>}
           <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
             <div title="Mak kau ijau" style={{ display:"flex", flexDirection:"column", alignItems:"center", flex:"0 0 auto" }}>
               <img src="/img/makkauijau.png" alt="Mak kau ijau" className="mki-shake" style={{ height:mobile?40:52, width:"auto", display:"block", filter:"drop-shadow(0 2px 5px #000a)" }} />
