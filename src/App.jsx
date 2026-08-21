@@ -33,6 +33,19 @@ const ROLE_MULT = {
 };
 const cleanCluster = (c) => (c || "").replace(/_\d+$/, "").replace(/_/g, " ");
 
+// ─── HORIZON ───────────────────────────────────────────────────────────────────
+// How many gameweeks the model projects is a property of the DATA FILE, not of this
+// app. It used to be hardcoded as 3 in about twenty places — every [0,1,2] loop, the
+// "xPTS·3GW" labels, both gameweek pickers, buildXI and the squad optimiser — so
+// emitting a five-gameweek file would have rendered three of the five and silently
+// mislabelled every total. Set once on load from players.json; everything reads it.
+let HORIZON = 3, GW_FROM = 1;
+const setHorizon = (n, from) => { HORIZON = Math.max(1, Math.min(12, n | 0)); GW_FROM = from || 1; };
+const GW_IDX = () => Array.from({ length: HORIZON }, (_, i) => i);
+const gwLabel = (i) => `GW${GW_FROM + i}`;
+const spanLabel = () => `${gwLabel(0)}–${gwLabel(HORIZON - 1)}`;
+const xptsLabel = () => `xPTS·${HORIZON}GW`;
+
 // ─── PREDICTION ENGINE (uses upgraded schema: minutes, per-MD odds, role, etc.) ─
 function computePrediction(p, riskMode) {
   const fx = p.fixtures || [];
@@ -60,7 +73,7 @@ function computePrediction(p, riskMode) {
   // SINGLE ENGINE: 3-gameweek base = sum of the three per-gameweek projections (mdScore).
   // This guarantees xPTS·3GW === GW1 + GW2 + GW3 — no hidden adjustments baked into the headline.
   let base = 0;
-  for (let mi = 0; mi < 3; mi++) base += mdScore(p, mi).pts;
+  for (let mi = 0; mi < HORIZON; mi++) base += mdScore(p, mi).pts;
 
   // surfaced SEPARATELY (flag/badge), not silently added to the displayed total
   const scoutBonusEV = p.own < 5 ? 1.8 : 0;
@@ -72,8 +85,16 @@ function computePrediction(p, riskMode) {
   const floorF = Math.max(0.55, 1 - posVar + spLift), ceilF = 1 + posVar;
 
   const pts_mean = +base.toFixed(2);
-  const pts_median = +(base * floorF).toFixed(2);
-  const pts_p90 = +(base * ceilF).toFixed(2);
+  // Floor and ceiling are the 15th and 85th percentiles of the CONVOLVED horizon
+  // distribution when the data file carries them (emitted by dist.py), and fall back to
+  // the old positional-constant approximation when it does not. The old version was
+  // `mean × floorF` with floorF fixed per position, so within a position it could not
+  // reorder anything — which is why the squad optimiser below returns identical squads
+  // for Safe and Balanced. These are real quantiles and they are not a rescaled mean.
+  const hasDist = typeof p.pts_safe === "number" && typeof p.pts_diff === "number"
+                  && p.pts_diff > p.pts_safe;
+  const pts_median = hasDist ? p.pts_safe : +(base * floorF).toFixed(2);
+  const pts_p90 = hasDist ? p.pts_diff : +(base * ceilF).toFixed(2);
   const capMult = p.captainSlot === 3 ? 1.15 : p.captainSlot === 2 ? 1.08 : 1.0;
   const captainValue = pts_p90 * capMult;
 
@@ -82,10 +103,10 @@ function computePrediction(p, riskMode) {
   // 2 pts/GW just for playing, so ~6 of any 3-gameweek total is bought at any price —
   // dividing the raw total by price therefore ranks £4.0m keepers above £15.5m strikers
   // by construction. VAPM removes that constant before dividing.
-  const APPEARANCE_BASE = 2 * 3;
+  const APPEARANCE_BASE = 2 * HORIZON;
   return { pts_median, pts_mean, pts_p90, displayPts, value: displayPts / p.price,
            vapm: (displayPts - APPEARANCE_BASE) / p.price,
-           scoutBonusEV, causalAdj, captainValue, E_MATCHES: 3, E_mins, csP, goalP, xGadj: xG, xAadj: xA };
+           scoutBonusEV, causalAdj, captainValue, E_MATCHES: HORIZON, E_mins, csP, goalP, xGadj: xG, xAadj: xA };
 }
 
 // ─── PER-MATCHDAY xPts (shared by Fantasy XI, Players tab next-MD col, and Planner) ─
@@ -133,12 +154,19 @@ function mdScorerProb(p, mi) {
 }
 // clean-sheet probability for a team given one of its fixtures (win/draw weighted, model-consistent)
 const csFromFixture = f => (f ? f.oddsWin * 0.72 + f.oddsDraw * 0.28 : 0);
-// "Next gameweek" index from today's date (GW1 Jun11-15, GW2 Jun16-21, GW3 Jun22-27).
+// "Next gameweek" index from today's date. Walks the real 2026/27 deadline list rather
+// than hardcoding two cut points, so it stays correct for any horizon.
+const GW_DEADLINES = [
+  "2026-08-21T17:30:00Z", "2026-08-28T17:30:00Z", "2026-09-04T17:30:00Z",
+  "2026-09-12T12:30:00Z", "2026-09-18T17:30:00Z", "2026-10-10T10:00:00Z",
+  "2026-10-17T10:00:00Z", "2026-10-23T17:30:00Z", "2026-10-31T11:30:00Z",
+  "2026-11-07T14:00:00Z", "2026-11-21T14:00:00Z", "2026-11-28T14:00:00Z",
+].map(x => new Date(x).getTime());
 function currentNextMd() {
-  // index into the 3-gameweek horizon: 0 until the GW1 deadline, then 1, then 2.
   const t = Date.now();
-  const d = ["2026-08-21T17:30:00Z", "2026-08-28T17:30:00Z"].map(x => new Date(x).getTime());
-  return t < d[0] ? 0 : t < d[1] ? 1 : 2;
+  const i = GW_DEADLINES.findIndex(d => t < d);          // first deadline still ahead of us
+  if (i < 0) return HORIZON - 1;
+  return Math.min(Math.max(i - (GW_FROM - 1), 0), HORIZON - 1);
 }
 const NEXT_MD = currentNextMd();
 // Scout-bonus eligibility: +2 pts when a player is owned by <5% and returns >4 pts.
@@ -176,13 +204,15 @@ const CLUSTER_TIP = {
 const TIER_TIP = { S:"S-Tier — top 8% by gambling score. Build-around pick.", A:"A-Tier — top 25%. Strong core piece.", B:"B-Tier — top 50%. Solid contributor.", C:"C-Tier — situational/fixture-dependent.", D:"D-Tier — avoid / bench fodder." };
 
 // ── filter predicates (Change A) ───────────────────────────────────────────────
-// Thresholds are calibrated to the FPL 3-gameweek scale (top total ~20 pts, best team
-// clean-sheet probability ~0.44), not the World Cup scale the chips were written for.
+// Thresholds were hand-calibrated on the FPL 3-gameweek scale (top total ~20 pts, best
+// team clean-sheet probability ~0.44). A longer horizon inflates every points total, so
+// the point thresholds are scaled by the horizon and the probability ones are not.
+const P3 = (x) => x * HORIZON / 3;
 const ROLE_PREDS = {
   pen:p=>p.penTaker, fk:p=>p.fkTaker, corner:p=>p.cornerTaker,
   setCombo:p=>[p.penTaker,p.fkTaker,p.cornerTaker].filter(Boolean).length>=2,
   csFort:p=>(p.csP||0)>0.40, scout:p=>p.own<5,
-  budgetEnabler:p=>p.price<=5.0 && p.pts_balanced>9,
+  budgetEnabler:p=>p.price<=5.0 && p.pts_balanced>P3(9),
   multiThreat:p=>((p.xGp90||0)+(p.xAp90||0))>0.45,
   captainViable:p=>p.captainSlot===3 && p.startProb>0.90,
   cardSafe:p=>p.cardRisk==="low",
@@ -193,13 +223,13 @@ const ROLE_DEFS = [["pen","🎯 PEN"],["fk","🦶 FK"],["corner","📐 CORNER"],
 const SMART_PREDS = {
   // attacking starters who contribute a lot; the auto-set MD + "easy fixture" filter adds the
   // high-win-probability-vs-weak-opponent half (switch MD via the Gameweek dropdown).
-  captainPicks:p=>p.startProb>=0.85 && (p.pts_balanced||0)>10 && (p.pos==="MID"||p.pos==="FWD"),
-  scoutTargets:p=>p.own<5 && p.pts_balanced>9 && p.startProb>0.75,
-  budgetBuilders:p=>p.price<=5.5 && (p.pts_balanced||0)>8 && (p.startProb||0)>0.70,
+  captainPicks:p=>p.startProb>=0.85 && (p.pts_balanced||0)>P3(10) && (p.pos==="MID"||p.pos==="FWD"),
+  scoutTargets:p=>p.own<5 && p.pts_balanced>P3(9) && p.startProb>0.75,
+  budgetBuilders:p=>p.price<=5.5 && (p.pts_balanced||0)>P3(8) && (p.startProb||0)>0.70,
   // role/usage mispricing: attacking role-shift OR model-underrated, low-owned, and a plausible starter
   roleArb:p=>p.mispricing_flag==="UNDERRATED" && p.own<20 && (p.startProb||0)>=0.65 && (p.pts_balanced||0)>8,
   defHolds:p=>(p.pos==="DEF"||p.pos==="GK") && (p.csP||0)>0.33 && p.cardRisk!=="high" && (p.startProb||0)>=0.6,
-  diffStack:p=>p.own<10 && (p.startProb||0)>=0.7 && (p.pts_diff||0)>12,
+  diffStack:p=>p.own<10 && (p.startProb||0)>=0.7 && (p.pts_diff||0)>P3(12),
 };
 const SMART_DEFS = [["captainPicks","🎯 Captain Picks (pick GW)"],["scoutTargets","🔍 Low-Owned Returns"],
   ["budgetBuilders","💰 Budget Builders"],["roleArb","⬆️ Price Arbitrage"],["defHolds","🏰 Defensive Holds"],["diffStack","📈 Differential Stack"]];
@@ -223,7 +253,7 @@ function passesFilters(p, F, cl) {
   const applyAdv = !F.smart || F.advMin !== 0;
   if (applyXMins && (p.startProb||0)*(p.minsIfStarted||0) < F.xMins) return false;
   if (applyAdv && (p.advP||0) < F.advMin) return false;
-  if ((p.pts_balanced||0) < F.ptsMin) return false;
+  if ((p.pts_balanced||0) < P3(F.ptsMin)) return false;
   return true;
 }
 const activeFilterCount = F => Object.values(F.roles).filter(Boolean).length + (F.smart?1:0) + (F.md!=null?1:0)
@@ -309,7 +339,7 @@ function FilterPanel({ F, setF, show, setShow, pool }) {
           </div>
           <div style={{ fontSize:9, letterSpacing:2, color:DIM, marginBottom:6 }}>FIXTURES</div>
           <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:12, alignItems:"center" }}>
-            <label style={{fontSize:11,color:DIM}}>Gameweek <select value={F.md==null?"":F.md} onChange={e=>set("md",e.target.value===""?null:+e.target.value)} style={sel}><option value="">—</option><option value="0">GW1</option><option value="1">GW2</option><option value="2">GW3</option></select></label>
+            <label style={{fontSize:11,color:DIM}}>Gameweek <select value={F.md==null?"":F.md} onChange={e=>set("md",e.target.value===""?null:+e.target.value)} style={sel}><option value="">—</option>{GW_IDX().map(i=><option key={i} value={i}>{gwLabel(i)}</option>)}</select></label>
             {F.md!=null && <label style={{fontSize:11,color:DIM}}>Strength <select value={F.fixStr} onChange={e=>set("fixStr",e.target.value)} style={sel}><option value="all">All</option><option value="easy">Easy &gt;65%</option><option value="medium">Medium 40-65%</option><option value="hard">Hard &lt;40%</option></select></label>}
             <label style={{fontSize:11,color:DIM}}>Team style <select value={F.teamPlay} onChange={e=>set("teamPlay",e.target.value)} style={sel}><option>All</option>{CLUSTERS.map(c=><option key={c} value={c}>{c.replace(/_/g," ")}</option>)}</select></label>
             {F.md!=null && <label style={{fontSize:11,color:DIM}}>Opp style <select value={F.oppPlay} onChange={e=>set("oppPlay",e.target.value)} style={sel}><option>All</option>{CLUSTERS.map(c=><option key={c} value={c}>{c.replace(/_/g," ")}</option>)}</select></label>}
@@ -351,9 +381,9 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
     ? new Date(dataTimestamp).toLocaleString("en-US", { timeZone:"Asia/Kuala_Lumpur", month:"short", day:"numeric", year:"numeric", hour:"numeric", minute:"2-digit", hour12:true })
     : null;
   const riskLabel = { safe:"🛡️ Safe", balanced:"⚖️ Balanced", diff:"🎯 Differential" };
-  const riskDesc  = { safe:"Median pts — low-variance template picks",
+  const riskDesc  = { safe:`15th percentile over ${spanLabel()} — what a bad run still returns`,
                       balanced:"Mean expected pts — default projection",
-                      diff:"90th-pct + scouting bonus — ceiling chasing" };
+                      diff:`85th percentile over ${spanLabel()} — sort by HAUL for real differentials` };
   return (
     <>
       {/* risk mode */}
@@ -403,7 +433,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
       {mobile && <WatchlistBox players={allPlayers} watch={watch} toggleWatch={toggleWatch} onPick={(p)=>setSelected(p)} pickLabel="view" />}
       {/* sort hint + count (sorting now lives on the clickable column headers) */}
       <div style={{ display:"flex", alignItems:"center", borderBottom:`1px solid ${BORDER}`, padding:"6px 2px" }}>
-        <span style={{ fontSize:11, color:DIM }}>Tip: click any column header (xPTS·3GW, xP/£M, VAPM, GW1–3, OWN, TIER…) to sort high → low</span>
+        <span style={{ fontSize:11, color:DIM }}>Tip: click any column header ({xptsLabel()}, xP/£M, VAPM, HAUL, per-gameweek, OWN, TIER…) to sort high → low</span>
         <span style={{ marginLeft:"auto", fontSize:10, color:DIM, paddingRight:4 }}>{players.length>200?`top 200 of ${players.length}`:`${players.length} players`}</span>
       </div>
 
@@ -436,7 +466,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   <span style={{ color:p.E_mins<60?"#eab308":"#94a3b8" }}>{Math.round(p.E_mins)}'</span>
                   <span style={{ color:p.displayPts>15?"#f97316":p.displayPts>11?"#22c55e":TEXT, fontWeight:700 }}>xPTS {p.displayPts.toFixed(1)}</span>
                   <span style={{ color:"#7b8cde" }} title="GW1·GW2·GW3 xPts">GW {mdScore(p,0).pts.toFixed(1)}·{mdScore(p,1).pts.toFixed(1)}·{mdScore(p,2).pts.toFixed(1)}</span>
-                  <span style={{ color:"#94a3b8" }} title="xPts per £m over GW1-GW3">{(p.value||0).toFixed(2)}/£m</span>
+                  <span style={{ color:"#94a3b8" }} title={`xPts per £m over ${spanLabel()}`}>{(p.value||0).toFixed(2)}/£m</span>
                   <span>Own {p.own}%</span>
                 </div>
               </div>
@@ -448,7 +478,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
         </div>
       ) : (
       <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:"0 0 10px 10px", overflow:"hidden" }}>
-        <div style={{ display:"grid", gridTemplateColumns:"24px 1fr 46px 40px 52px 48px 46px 32px 32px 32px 50px 88px 28px 40px",
+        <div style={{ display:"grid", gridTemplateColumns:`24px 1fr 46px 40px 52px 48px 46px ${GW_IDX().map(()=>"32px").join(" ")} 44px 50px 88px 28px 40px`,
           gap:8, padding:"8px 12px", borderBottom:`1px solid ${BORDER}`, fontSize:9, letterSpacing:1, color:DIM, background:"#0a121f" }}>
           {(() => { const SH = (k, label, align="right", title) => (
             <div onClick={()=>setSortBy(k)} title={title || `Sort by ${label} (high → low)`}
@@ -457,12 +487,11 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
           <div>#</div><div>PLAYER</div>
           {SH("price","£")}
           {SH("xmins","xMIN")}
-          {SH("displayPts","xPTS·3GW","right","Projected FPL points over the next 3 gameweeks (GW1+GW2+GW3), straight from the model — same 3 games for every player.")}
-          {SH("value","xP/£M","right","xPts over the next 3 gameweeks ÷ price. Structurally favours cheap nailed players: about 6 of those points are appearance points, which cost the same at £4.0m as at £15.5m. Use it for bench and enabler slots.")}
-          {SH("vapm","VAPM","right","Value above the appearance baseline: (3-gameweek xPts − 6) ÷ price. Strips the 2 pts/GW every starter earns for turning up, so it ranks by what you are actually paying for. Use it for your XI.")}
-          {SH("md0","GW1","right","Projected xPts in Gameweek 1")}
-          {SH("md1","GW2","right","Projected xPts in Gameweek 2")}
-          {SH("md2","GW3","right","Projected xPts in Gameweek 3")}
+          {SH("displayPts",xptsLabel(),"right",`Projected FPL points over the next ${HORIZON} gameweeks (${spanLabel()}), straight from the model — the same ${HORIZON} games for every player.`)}
+          {SH("value","xP/£M","right",`xPts over the next ${HORIZON} gameweeks ÷ price. Structurally favours cheap nailed players: about ${2*HORIZON} of those points are appearance points, which cost the same at £4.0m as at £15.5m. Use it for bench and enabler slots.`)}
+          {SH("vapm","VAPM","right",`Value above the appearance baseline: (${HORIZON}-gameweek xPts − ${2*HORIZON}) ÷ price. Strips the 2 pts/GW every starter earns for turning up, so it ranks by what you are actually paying for. Use it for your XI.`)}
+          {GW_IDX().map(i => <div key={`h${i}`} style={{display:"contents"}}>{SH(`md${i}`, gwLabel(i), "right", `Projected xPts in ${gwLabel(i)}`)}</div>)}
+          {SH("haul","HAUL","right","Expected number of 10+ point gameweeks over the horizon, from the convolved points distribution — not the mean rescaled. Over a multi-gameweek total the 85th percentile is almost perfectly correlated with the mean (r ≈ 0.995 within position), so the ceiling cannot find you a differential. The count of haul gameweeks can: it separates keepers and defenders in particular, where it correlates with the mean at only 0.42 and 0.86.")}
           {SH("blend","BLEND","right","Ranking blend: 0.35 × this model + 0.65 × last season's total points, both z-scored. Replaying 2025/26 GW1–6, last season's points out-ranked the model on its own (Spearman 0.713 vs 0.683) and the blend beat both (0.718, and 8 of the true top 20 against 7 for either alone). Use it as a second opinion on the top of the table, not as a points estimate.")}
           {SH("own","OWN")}
           {SH("tier","TIER","center")}
@@ -473,7 +502,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
           const posCol = POS_COLOR[p.pos];
           return (
             <div key={p.id} onClick={()=>setSelected(selected?.id===p.id?null:p)}
-              style={{ display:"grid", gridTemplateColumns:"24px 1fr 46px 40px 52px 48px 46px 32px 32px 32px 50px 88px 28px 40px",
+              style={{ display:"grid", gridTemplateColumns:`24px 1fr 46px 40px 52px 48px 46px ${GW_IDX().map(()=>"32px").join(" ")} 44px 50px 88px 28px 40px`,
                 gap:8, padding:"9px 12px", borderBottom:`1px solid ${BORDER}33`,
                 background:selected?.id===p.id?"#f9731610": i<3?"#0f1c2d":"transparent",
                 cursor:"pointer", alignItems:"center" }}>
@@ -509,14 +538,17 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
               </div>
               <div style={{ textAlign:"right", fontSize:15, color:"#94a3b8", fontWeight:600 }}>£{p.price}m</div>
               <div style={{ textAlign:"right", fontSize:12, color:p.E_mins<60?"#eab308":"#94a3b8" }}>{Math.round(p.E_mins)}'</div>
-              <div title={`Predicted ${p.displayPts.toFixed(1)} pts over GW1-GW3 (${riskMode}). Floor ${p.pts_median?.toFixed(1)} · ceiling ${p.pts_p90?.toFixed(1)}`}
+              <div title={`Predicted ${p.displayPts.toFixed(1)} pts over ${spanLabel()} (${riskMode}). 15th pct ${p.pts_median?.toFixed(1)} · 85th pct ${p.pts_p90?.toFixed(1)}`}
                 style={{ textAlign:"right", fontSize:18, fontWeight:800, cursor:"help",
                 color:p.displayPts>15?"#f97316":p.displayPts>11?"#22c55e":TEXT }}>{p.displayPts.toFixed(1)}</div>
-              <div title={`${(p.value||0).toFixed(2)} xPts per £m over GW1-GW3`} style={{ textAlign:"right", fontSize:13, fontWeight:700, cursor:"help", color:p.value>2.1?"#f97316":p.value>1.8?"#22c55e":DIM }}>{(p.value||0).toFixed(2)}</div>
+              <div title={`${(p.value||0).toFixed(2)} xPts per £m over ${spanLabel()}`} style={{ textAlign:"right", fontSize:13, fontWeight:700, cursor:"help", color:p.value>2.1?"#f97316":p.value>1.8?"#22c55e":DIM }}>{(p.value||0).toFixed(2)}</div>
               <div title={`${(p.vapm||0).toFixed(2)} xPts per £m above the 2 pts/GW appearance baseline`} style={{ textAlign:"right", fontSize:13, fontWeight:700, cursor:"help", color:p.vapm>1.1?"#f97316":p.vapm>0.9?"#22c55e":DIM }}>{(p.vapm||0).toFixed(2)}</div>
-              {[0,1,2].map(mi => { const ms = mdScore(p, mi); return (
-                <div key={mi} title={`GW${mi+1}${ms.opp?` vs ${ms.opp}`:""} — projected ${ms.pts.toFixed(1)} pts`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color: ms.pts>6?"#f97316":ms.pts>4?"#22c55e":DIM }}>{ms.pts.toFixed(1)}</div>
+              {GW_IDX().map(mi => { const ms = mdScore(p, mi); return (
+                <div key={mi} title={`${gwLabel(mi)}${ms.opp?` vs ${ms.opp}`:""} — projected ${ms.pts.toFixed(1)} pts`} style={{ textAlign:"right", fontSize:12, fontWeight:700, cursor:"help", color: ms.pts>6?"#f97316":ms.pts>4?"#22c55e":DIM }}>{ms.pts.toFixed(1)}</div>
               ); })}
+              <div title={`Expects ${(p.p_haul??0).toFixed(2)} gameweeks of 10+ points over ${spanLabel()}, and ${(p.p_blank??0).toFixed(2)} of 2 or fewer. From the convolved distribution, not the mean.`}
+                style={{ textAlign:"right", fontSize:12, fontWeight:700, fontFamily:MONO, cursor:"help",
+                color:(p.p_haul??0)>0.6?"#f97316":(p.p_haul??0)>0.35?"#22c55e":DIM }}>{(p.p_haul??0).toFixed(2)}</div>
               <div title={`Blend ${(p.blend_z??0).toFixed(2)}σ — model ${p.model_xpts?.toFixed(1)} xPts, last season ${p.last_season_pts ?? "—"} pts`}
                 style={{ textAlign:"right", fontSize:13, fontWeight:700, fontFamily:MONO, cursor:"help",
                 color:(p.blend_z??0)>2?"#f97316":(p.blend_z??0)>1?"#22c55e":(p.blend_z??0)<-0.5?"#64748b":DIM }}>{(p.blend_z??0)>0?"+":""}{(p.blend_z??0).toFixed(2)}</div>
@@ -622,7 +654,7 @@ function PlayerDetail({ p, riskMode, onClose, watch, toggleWatch }) {
                 </div>
               ))}
               <div style={{ borderTop:`1px solid ${BORDER}`, marginTop:8, paddingTop:8, fontSize:11, color:DIM, lineHeight:1.6 }}>
-                Sums to <b style={{color:TEXT}}>{(p.model_xpts ?? 0).toFixed(2)}</b> over GW1–GW3.
+                Sums to <b style={{color:TEXT}}>{(p.model_xpts ?? 0).toFixed(2)}</b> over {spanLabel()}.
                 Appearance points are {(((p.comp.appearance||0)/Math.max(p.model_xpts||1,0.01))*100).toFixed(0)}% of the total —
                 every nailed starter banks those, so compare players on VAPM, not raw xPts.
               </div>
@@ -949,7 +981,7 @@ function StartingXITab({ pool, mobile }) {
     return { formation: r.formation, total_pts: r.xiPts, players, bench,
       budget: r.cost, captain: { ...cap, opp: cap.mdOpp, win: cap.mdWin } };
   };
-  const xis = [0,1,2].map(buildXI);
+  const xis = GW_IDX().map(buildXI);
   const idSets = xis.map(x=>new Set(x.players.map(p=>p.id)));
   const allThree = id => idSets.every(s=>s.has(id));      // FIXTURE SHIFT = not in all 3 MD XIs
   const xi = xis[md], cap = xi.captain;
@@ -962,11 +994,11 @@ function StartingXITab({ pool, mobile }) {
       <div style={{ fontSize:11, color:DIM, marginBottom:6, lineHeight:1.5, maxWidth:760 }}>
         Optimised for <b style={{color:"#94a3b8"}}>one gameweek at a time</b> — pick a gameweek below and it rebuilds. A full £100m
         15-man squad, 2/5/5/3, at most 3 per club. For the squad you actually register and keep, use
-        <b style={{color:"#94a3b8"}}> Squad Strategies</b>, which optimises over GW1–GW3 together.
+        <b style={{color:"#94a3b8"}}> Squad Strategies</b>, which optimises over {spanLabel()} together.
       </div>
       <div style={{ fontSize:11, color:DIM, marginBottom:12 }}>Model-selected optimal XI · Built from xPts, role regression, fixture difficulty and LP optimization</div>
       <div style={{ display:"flex", gap:4, marginBottom:12 }}>
-        {[0,1,2].map(i=>(
+        {GW_IDX().map(i=>(
           <button key={i} onClick={()=>setMd(i)} style={{ padding:"7px 16px", borderRadius:6, fontFamily:"inherit", fontSize:13, cursor:"pointer", fontWeight:md===i?700:400,
             border:`1px solid ${md===i?"#f97316":BORDER}`, background:md===i?"#f9731618":"transparent", color:md===i?"#f97316":DIM }}>GW{i+1}</button>
         ))}
@@ -1028,7 +1060,7 @@ function StartingXITab({ pool, mobile }) {
             </div>
             <div style={{ fontSize:11, color:DIM, margin:"4px 0" }}>{pl.team} · £{pl.price}m · {pl.pts_balanced} xPts · {pl.value} val</div>
             {showDesc && (() => {
-              const why = `GW${md+1} pick — ${Math.round(pl.mdWin*100)}% win vs ${pl.mdOpp}, ${pl.pts_balanced} xPts over GW1–GW3.`;
+              const why = `${gwLabel(md)} pick — ${Math.round(pl.mdWin*100)}% win vs ${pl.mdOpp}, ${pl.pts_balanced} xPts over ${spanLabel()}.`;
               const key = (pl.pos==="GK"||pl.pos==="DEF")
                 ? `Clean sheet prob ${Math.round((pl.csP||0)*100)}% (model, not a win-odds proxy) → expected CS points`
                 : `npxG/90 ${(pl.xGp90||0).toFixed(2)} → goal threat, scaled by the fixture's expected team goals`;
@@ -1089,8 +1121,14 @@ function buildOptimalSquads(pool) {
   if (!pool || !pool.length) return { squads: null, meta: {} };
   // Six strategies. Each is a different STRUCTURE — a different constraint set or a different
   // objective — not the same ranking with a different threshold. The old set had Safe and
-  // Balanced returning identical squads, because pts_safe is pts_balanced x 0.72 and a
-  // monotone transform cannot reorder anything.
+  // Balanced returning identical squads, because pts_safe was pts_balanced x 0.72 and a
+  // monotone transform cannot reorder anything. pts_safe and pts_diff are now the 15th and
+  // 85th percentiles of the convolved horizon distribution, so they carry real information —
+  // but over a five-gameweek TOTAL they still correlate with the mean at about 0.995 within
+  // position, because a sum of five gameweeks is close to normal and its quantiles are close
+  // to mean ± a constant. The tail information that does reorder is p_haul, the expected
+  // COUNT of 10+ point gameweeks, which correlates with the mean at only 0.42 for keepers and
+  // 0.86 for defenders. That is what the Psychopath objective now maximises.
   const X = p => p.pts_balanced || 0;
   const defs = {
     safe: {
@@ -1102,7 +1140,7 @@ function buildOptimalSquads(pool) {
     },
     balanced: {
       label: "Balanced — Unconstrained Optimum",
-      description: "The most projected points a legal £100m squad can produce over GW1–GW3, with nothing else asked of it. Every other strategy is a constraint on this one, so the gap tells you what that constraint costs.",
+      description: `The most projected points a legal £100m squad can produce over ${spanLabel()}, with nothing else asked of it. Every other strategy is a constraint on this one, so the gap tells you what that constraint costs.`,
       objective: "max XI Σ xPts",
       score: X, sp: 0.75,
     },
@@ -1129,9 +1167,9 @@ function buildOptimalSquads(pool) {
     },
     ceiling: {
       label: "Psychopath — Ceiling Chase",
-      description: "Maximises expected RETURNS — the number of matches in which a player scores or assists — instead of expected points. Different arithmetic, not a re-weighting: it buys goal threat and ignores the appearance and clean-sheet points that make the safe squads look good.",
+      description: "Maximises the expected COUNT of 10+ point gameweeks instead of expected points. Different arithmetic, not a re-weighting: it reads the right tail of the convolved points distribution, so it buys the players most likely to actually haul rather than the ones with the highest average.",
       objective: "max XI Σ P(goal or assist)",
-      score: p => p.model_haul || 0, sp: 0.70,
+      score: p => (p.p_haul ?? p.model_haul ?? 0), sp: 0.70,
       opts: { benchMinPts: 0, benchSpMin: 0.5 },
     },
   };
@@ -1150,7 +1188,7 @@ function buildOptimalSquads(pool) {
     const omitted = pool.filter(p => !inSquad.has(p.id) && p.price >= 8.0 && (p.startProb || 0) >= 0.7)
                         .sort((a, b) => (b.pts_balanced || 0) - (a.pts_balanced || 0)).slice(0, 3)
                         .map(p => ({ name: p.name, price: p.price, pts: Math.round((p.pts_balanced || 0) * 10) / 10, own: p.own }));
-    meta[k] = { label: d.label, description: d.description + ` · ${r.form} · 3-gameweek xPts`, objective: d.objective, omitted,
+    meta[k] = { label: d.label, description: d.description + ` · ${r.form} · ${HORIZON}-gameweek xPts`, objective: d.objective, omitted,
       total_pts: Math.round(tot), budget: Math.round(bud * 10) / 10, avg_own: Math.round(own * 10) / 10,
       returns: Math.round(returns * 10) / 10,
       n_scout: sq.filter(p => (p.own || 0) < 5).length, template_overlap_pct: Math.round(sq.filter(p => (p.own || 0) > 20).length / (sq.length || 1) * 100) };
@@ -1174,14 +1212,14 @@ function OptimalSquadsTab({ squads, meta, mobile }) {
               <span><b style={{color:TEXT}}>{m.total_pts??"—"}</b> XI pts</span>
               <span><b style={{color:TEXT}}>£{m.budget??"—"}m</b></span>
               <span>own <b style={{color:TEXT}}>{m.avg_own??"—"}%</b></span>
-              <span title="Expected number of matches across the XI in which a player scores or assists, over GW1–GW3. The ceiling metric.">returns <b style={{color:"#4ade80"}}>{m.returns??"—"}</b></span>
+              <span title={`Expected number of matches across the XI in which a player scores or assists, over ${spanLabel()}. The ceiling metric.`}>returns <b style={{color:"#4ade80"}}>{m.returns??"—"}</b></span>
               <span>template <b style={{color:TEXT}}>{m.template_overlap_pct??"—"}%</b></span>
             </div>
             {!!(m.omitted && m.omitted.length) && (
               <div style={{ fontSize:10, color:DIM, marginBottom:8, lineHeight:1.5 }}>
                 <span style={{ letterSpacing:1, fontFamily:MONO }}>PASSED OVER </span>
                 {m.omitted.map(o => (
-                  <span key={o.name} title={`${o.name} projects ${o.pts} xPts over GW1–GW3 at £${o.price}m — this objective found a better use of the money. ${o.own}% owned.`}
+                  <span key={o.name} title={`${o.name} projects ${o.pts} xPts over ${spanLabel()} at £${o.price}m — this objective found a better use of the money. ${o.own}% owned.`}
                     style={{ color:"#94a3b8", cursor:"help", marginRight:6 }}>
                     {o.name} <span style={{ color:"#475569" }}>£{o.price}m·{o.pts}</span>
                   </span>
@@ -1714,7 +1752,7 @@ function MethodTab({ analytics }) {
         <div style={{ fontSize:10, letterSpacing:3, color:OR, marginBottom:8, fontFamily:MONO }}>TL;DR</div>
         <div style={{ fontSize:14.5, lineHeight:1.65, color:"#e2e8f0" }}>
           FPL SCOUT builds expected points from the ground up. It does not regress on FPL points — it models each scoring event's probability and sums them, so the output is a distribution rather than a single number. <b style={{ color:"#fff" }}>Every number has a source. Every pick has a reason.</b>
-          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts covers <b style={{color:"#fff"}}>GW1–GW3</b>, so every player is compared over the same three fixtures. Fixture difficulty is not a rating — it is a parameter inside a fitted goal model. Expected minutes come from a model validated out of sample at <b style={{color:"#fff"}}>AUC 0.856</b>.</div>
+          <div style={{ marginTop:10, fontSize:12.5, color:"#94a3b8" }}>Current scope: xPts covers <b style={{color:"#fff"}}>{spanLabel()}</b>, so every player is compared over the same {HORIZON} fixtures. Fixture difficulty is not a rating — it is a parameter inside a fitted goal model. Expected minutes come from a model validated out of sample at <b style={{color:"#fff"}}>AUC 0.856</b>.</div>
         </div>
         <div style={{ display:"flex", gap:8, marginTop:14, flexWrap:"wrap" }}>
           {["Dixon-Coles goal model","fitted expected minutes","full points distribution"].map(t=>(
@@ -1790,9 +1828,10 @@ log λ_away = μ + att[away] − def[home]     + β·FDR`}</MtFormula>
       <MtCollapse title="2.6 — Reading the value columns" sub="why cheap keepers top a points-per-million table">
         <div>Three columns in the Players tab answer three different questions, and mixing them up is the most common way to misread this table.</div>
         <MtTable head={["Column","Definition","Use it for"]} rows={[
-          ["xPTS·3GW","Σ xPts over GW1–GW3","Who scores most. Captaincy."],
-          ["xP/£M","xPTS·3GW ÷ price","Bench and enabler slots."],
-          ["VAPM","(xPTS·3GW − 6) ÷ price","Your starting XI."],
+          [xptsLabel(),`Σ xPts over ${spanLabel()}`,"Who scores most. Captaincy."],
+          ["xP/£M",`${xptsLabel()} ÷ price`,"Bench and enabler slots."],
+          ["VAPM",`(${xptsLabel()} − ${2*HORIZON}) ÷ price`,"Your starting XI."],
+          ["HAUL","Expected count of 10+ point gameweeks","Differentials. This is where the tail lives, not in the ceiling."],
         ]} />
         <div style={{ marginTop:8 }}>Any starter banks <b style={{color:"#fff"}}>2 points a gameweek simply for playing</b> — 6 over this horizon — and those cost the same at £4.0m as at £15.5m. Dividing the raw total by price therefore rewards being cheap, not being good: it puts a £4.5m keeper at 2.36 above every attacker in the game. Subtracting the appearance baseline first is the standard correction, and it is what VAPM does.</div>
         <MtNote>Neither is a substitute for the raw total in the slot where you are spending your budget. A 15-man squad has a fixed points ceiling set by the XI; value metrics tell you where to find the money to pay for it.</MtNote>
@@ -1875,9 +1914,9 @@ log λ_away = μ + att[away] − def[home]     + β·FDR`}</MtFormula>
 
       <MtH>Recommended workflow</MtH>
       <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.8, marginBottom:12 }}>
-        1. <b style={{color:"#fff"}}>Players</b> — sort by xPTS·3GW for your premium slots and VAPM for everything else, then sanity-check expected minutes. Anything under about 60 is a rotation risk regardless of how good the rate looks. Click any player for the point-by-point breakdown of where their total comes from.<br/>
+        1. <b style={{color:"#fff"}}>Players</b> — sort by {xptsLabel()} for your premium slots and VAPM for everything else, then sanity-check expected minutes. Anything under about 60 is a rotation risk regardless of how good the rate looks. Click any player for the point-by-point breakdown of where their total comes from.<br/>
         2. <b style={{color:"#fff"}}>Tiers</b> — the tier machinery was the most reliable component in the predecessor's validation. Trust the ordering more than the absolute numbers.<br/>
-        3. <b style={{color:"#fff"}}>Squad Strategies</b> — four objectives over the same constraints, each a full £100m 15-man squad optimised across GW1–GW3. Compare them rather than picking one, and read the <MtO>PASSED OVER</MtO> line: it names the expensive players each objective decided not to buy.<br/>
+        3. <b style={{color:"#fff"}}>Squad Strategies</b> — four objectives over the same constraints, each a full £100m 15-man squad optimised across {spanLabel()}. Compare them rather than picking one, and read the <MtO>PASSED OVER</MtO> line: it names the expensive players each objective decided not to buy.<br/>
         4. <b style={{color:"#fff"}}>Planner</b> — build the XI by hand and see what the model thinks.<br/>
         5. <b style={{color:"#fff"}}>Odds</b> — per-fixture scorer, assist and clean-sheet probabilities, straight from the goal model.
       </div>
@@ -2251,7 +2290,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     <div id="planner-export" style={{ position: "absolute", left: -99999, top: 0, width: 520, background: "#0d1829", padding: 18, fontFamily: SANS, color: TEXT }}>
       <div style={{ fontSize: 16, fontWeight: 900, color: "#fff", marginBottom: 2 }}>FPL SCOUT — My Squad</div>
       <div style={{ fontSize: 10, color: DIM, marginBottom: 10 }}>Budget ${spent}m/{PL_BUDGET}m · {formationValid ? formationStr : "XI incomplete"}</div>
-      {[0, 1, 2].map(mi => (
+      {GW_IDX().map(mi => (
         <div key={mi} style={{ marginBottom: 12, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "#f97316", marginBottom: 4 }}>GW{mi + 1} ({PL_MD_DATES[mi]}) — {mdTotal(mi)} xPts</div>
           {starters.map(id => byId[id]).filter(Boolean).sort((a, b) => POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos)).map(p => (
@@ -2292,7 +2331,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
 
       {/* MD tabs + total */}
       <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
-        {[0, 1, 2].map(i => <button key={i} onClick={() => setMd(i)} style={btn(md === i)}>GW{i + 1}</button>)}
+        {GW_IDX().map(i => <button key={i} onClick={() => setMd(i)} style={btn(md === i)}>GW{i + 1}</button>)}
         <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#fff" }}>GW{md + 1} projected: <span style={{ color: "#f97316" }}>{mdTotal(md)} xPts</span></span>
       </div>
 
@@ -2471,7 +2510,7 @@ function OddsTab({ pool, lineups, mobile }) {
       <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>🎲 Match Odds & Scorer Probabilities</div>
       <div style={{ fontSize: 11, color: DIM, marginBottom: 10 }}>Model-implied probabilities (Poisson on the xG/xA model) — not bookmaker lines. Group stage · {matches.length} fixtures.</div>
       <div style={{ display: "flex", gap: 4, marginBottom: 12, alignItems: "center" }}>
-        {[0, 1, 2].map(i => <button key={i} onClick={() => setMd(i)} style={{ padding: "7px 16px", borderRadius: 6, fontFamily: "inherit", fontSize: 13, cursor: "pointer", fontWeight: md === i ? 700 : 400, border: `1px solid ${md === i ? "#f97316" : BORDER}`, background: md === i ? "#f9731618" : "transparent", color: md === i ? "#f97316" : DIM }}>GW{i + 1}</button>)}
+        {GW_IDX().map(i => <button key={i} onClick={() => setMd(i)} style={{ padding: "7px 16px", borderRadius: 6, fontFamily: "inherit", fontSize: 13, cursor: "pointer", fontWeight: md === i ? 700 : 400, border: `1px solid ${md === i ? "#f97316" : BORDER}`, background: md === i ? "#f9731618" : "transparent", color: md === i ? "#f97316" : DIM }}>GW{i + 1}</button>)}
         <span style={{ marginLeft: "auto", fontSize: 11, color: DIM }}>{MD_DATES[md]}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(auto-fill,minmax(330px,1fr))", gap: 12 }}>
@@ -2552,6 +2591,8 @@ export default function App() {
       .then(([players, a, l, nw]) => {
         // players.json may be a bare array (legacy) or { generated_at, players }
         const arr = Array.isArray(players) ? players : players.players;
+        // the file states its own horizon; fall back to the length of the first xpGW array
+        setHorizon(players?.horizon ?? (arr?.[0]?.xpGW?.length ?? 3), players?.gw_from ?? 1);
         // merge R-model outputs (tier, tier_score, intl_premium_*, causal_pts_adjustment, form_mult, …)
         // from analytics.player_analytics by id — without this the Tiers tab/badges and smart filters are empty
         const paById = {}; (a?.player_analytics || []).forEach(r => { if (r && r.id != null) paById[r.id] = r; });
@@ -2590,14 +2631,18 @@ export default function App() {
             } else if (m.role === "BENCH") { q.startProb = 0.30; q.minsIfStarted = 30; }
             else { q.startProb = 0.10; q.minsIfStarted = 15; }              // OUT (deep squad)
           }
-          // recompute the GROUP-STAGE points distribution with the grounded start prob so the Players
-          // table, Tiers and smart filters all read the same numbers (E_MATCHES is fixed at 3 inside)
+          // recompute the points distribution with the grounded start prob so the Players table,
+          // Tiers and smart filters all read the same numbers
           const cp = computePrediction(q);
           q.pts_safe = +cp.pts_median.toFixed(1); q.pts_balanced = +cp.pts_mean.toFixed(1); q.pts_diff = +cp.pts_p90.toFixed(1);
           return q;
         });
-        // re-derive tier_score + tier letters (S/A/B/C/D) on the 3-gameweek numbers, replacing the
+        // re-derive tier_score + tier letters (S/A/B/C/D) on the horizon numbers, replacing the
         // R pipeline's full-tournament tiers so the Tiers tab matches the rest of the dashboard
+        // The weights below were tuned against 3-gameweek point totals, so a longer horizon
+        // would silently swamp the constants (scout bonus, captaincy, set pieces, penalties).
+        // Rescale the two points terms to a 3-gameweek equivalent and the balance is preserved.
+        const S3 = 3 / HORIZON;
         const tierScoreOf = q => {
           const scoutEV = q.own < 5 ? 1.8 : 0;
           const capB = q.captainSlot === 3 ? 1 : q.captainSlot === 2 ? 0.5 : 0;
@@ -2605,7 +2650,7 @@ export default function App() {
           const cardPen = q.cardRisk === "high" ? 1.5 : q.cardRisk === "medium" ? 0.6 : 0;
           const startPen = (1 - (q.startProb ?? 0.5)) * 4;          // rotation risk
           const exitPen = (1 - ((q.advP ?? 50) / 100)) * 2;          // early-exit risk
-          return (q.pts_diff || 0) * 0.45 + ((q.pts_diff || 0) - (q.pts_safe || 0)) * 0.20 + scoutEV * 0.15 + ((q.intl_premium_score || 0)) * 0.10 + capB * 0.5 + setP * 0.4 - cardPen - startPen - exitPen;
+          return (q.pts_diff || 0) * S3 * 0.45 + ((q.pts_diff || 0) - (q.pts_safe || 0)) * S3 * 0.20 + scoutEV * 0.15 + ((q.intl_premium_score || 0)) * 0.10 + capB * 0.5 + setP * 0.4 - cardPen - startPen - exitPen;
         };
         merged.forEach(q => { q.tier_score = +tierScoreOf(q).toFixed(1); });
         const ORD = ["S", "A", "B", "C", "D"];
@@ -2662,9 +2707,8 @@ export default function App() {
         if (sortBy === "price")      return b.price - a.price;
         if (sortBy === "own")        return b.own - a.own;
         if (sortBy === "tier")       return (b.tier_score||0) - (a.tier_score||0);
-        if (sortBy === "md0")        return mdScore(b, 0).pts - mdScore(a, 0).pts;
-        if (sortBy === "md1")        return mdScore(b, 1).pts - mdScore(a, 1).pts;
-        if (sortBy === "md2")        return mdScore(b, 2).pts - mdScore(a, 2).pts;
+        if (/^md\d+$/.test(sortBy)) { const i = +sortBy.slice(2); return mdScore(b, i).pts - mdScore(a, i).pts; }
+        if (sortBy === "haul")       return (b.p_haul||0) - (a.p_haul||0);
         if (sortBy === "xmins")      return (b.E_mins||0) - (a.E_mins||0);
         if (sortBy === "blend")      return (b.blend_z||0) - (a.blend_z||0);
         if (sortBy === "intl")       return (b.intl_premium_score||0) - (a.intl_premium_score||0);
@@ -2713,7 +2757,7 @@ export default function App() {
             <span style={{ marginLeft:"auto" }}><UrlBadge /></span>
           </div>
           <div style={{ fontSize:mobile?10:11, color:"#475569", marginTop:3, fontStyle:"italic" }}>makscouthijau — .uk because that was the cheapest domain</div>
-          <div style={{ fontSize:mobile?11:12, color:DIM, marginTop:4 }}>Expected-points engine · {rawPlayers.length} players · Dixon–Coles + fitted xMins · GW1–GW3</div>
+          <div style={{ fontSize:mobile?11:12, color:DIM, marginTop:4 }}>Expected-points engine · {rawPlayers.length} players · Dixon–Coles + fitted xMins · {spanLabel()}</div>
         </div>
       </div>
 
