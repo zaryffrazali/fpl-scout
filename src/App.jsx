@@ -45,6 +45,21 @@ const GW_IDX = () => Array.from({ length: HORIZON }, (_, i) => i);
 const gwLabel = (i) => `GW${GW_FROM + i}`;
 const spanLabel = () => `${gwLabel(0)}–${gwLabel(HORIZON - 1)}`;
 const xptsLabel = () => `xPTS·${HORIZON}GW`;
+// One definition for the desktop table's columns, used by the header row and every player
+// row. It has to be one definition: they are separate grids, and if their track lists ever
+// drift the headers stop sitting over their own numbers.
+//
+// The name column is minmax, not 1fr, because 1fr has no floor. Emitting a five-gameweek
+// file added two 32px gameweek columns and a HAUL column to a row whose fixed tracks already
+// filled the card, so the only flexible track absorbed the whole overflow and collapsed to
+// its ellipsis - the table rendered every player as a badge and three dots. The floor keeps
+// the name readable and lets the row overflow into a horizontal scroll instead. 200px fits the longest name in the
+// game next to the star and the club badge.
+const NAME_COL_MIN = 200;
+const ROW_COLS = () =>
+  `24px minmax(${NAME_COL_MIN}px,1fr) 46px 40px 52px 48px 46px `
+  + GW_IDX().map(() => "32px").join(" ")
+  + ` 44px 50px 88px 28px 40px`;
 
 // ─── PREDICTION ENGINE (uses upgraded schema: minutes, per-MD odds, role, etc.) ─
 function computePrediction(p, riskMode) {
@@ -477,8 +492,8 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
           })}
         </div>
       ) : (
-      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:"0 0 10px 10px", overflow:"hidden" }}>
-        <div style={{ display:"grid", gridTemplateColumns:`24px 1fr 46px 40px 52px 48px 46px ${GW_IDX().map(()=>"32px").join(" ")} 44px 50px 88px 28px 40px`,
+      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:"0 0 10px 10px", overflowX:"auto", overflowY:"hidden" }}>
+        <div style={{ display:"grid", gridTemplateColumns:ROW_COLS(),
           gap:8, padding:"8px 12px", borderBottom:`1px solid ${BORDER}`, fontSize:9, letterSpacing:1, color:DIM, background:"#0a121f" }}>
           {(() => { const SH = (k, label, align="right", title) => (
             <div onClick={()=>setSortBy(k)} title={title || `Sort by ${label} (high → low)`}
@@ -502,7 +517,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
           const posCol = POS_COLOR[p.pos];
           return (
             <div key={p.id} onClick={()=>setSelected(selected?.id===p.id?null:p)}
-              style={{ display:"grid", gridTemplateColumns:`24px 1fr 46px 40px 52px 48px 46px ${GW_IDX().map(()=>"32px").join(" ")} 44px 50px 88px 28px 40px`,
+              style={{ display:"grid", gridTemplateColumns:ROW_COLS(),
                 gap:8, padding:"9px 12px", borderBottom:`1px solid ${BORDER}33`,
                 background:selected?.id===p.id?"#f9731610": i<3?"#0f1c2d":"transparent",
                 cursor:"pointer", alignItems:"center" }}>
