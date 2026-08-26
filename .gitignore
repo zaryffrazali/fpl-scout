@@ -31,3 +31,9 @@ r-analytics/data/intl_matches_incoming.csv
 
 # scratch: files the sandbox could not unlink
 _to_delete/
+
+# Credentials — never commit, and never let one reach public/ which is deployed
+.secrets/
+*.key
+.env
+.env.*

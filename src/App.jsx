@@ -2565,9 +2565,179 @@ function OddsTab({ pool, lineups, mobile }) {
   );
 }
 
+// ─── HOME ────────────────────────────────────────────────────────────────────────
+// Six charts plus an availability list, built from dashboard.json (see ../make_dashboard.py).
+// Every panel states its own source. A panel with no data says so rather than rendering empty.
+const H_BLUE = "#3b82f6", H_GREEN = "#22c55e", H_RED = "#ef4444", H_AMBER = "#f59e0b";
+
+function Panel({ n, title, sub, children, mobile }) {
+  return (
+    <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: mobile ? "12px 12px" : "14px 16px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2 }}>
+        <span style={{ fontFamily: MONO, fontSize: 10, color: "#f97316" }}>{n}</span>
+        <span style={{ fontSize: mobile ? 13 : 14, fontWeight: 700, color: "#fff" }}>{title}</span>
+      </div>
+      <div style={{ fontSize: 11, color: DIM, marginBottom: 10, lineHeight: 1.5 }}>{sub}</div>
+      {children}
+    </div>
+  );
+}
+
+function Bar({ v, max, color, h = 13 }) {
+  const w = Math.max(0, Math.min(100, (v / max) * 100));
+  return (
+    <span style={{ display: "block", flex: 1, height: h, background: "#0a1424", borderRadius: 3, overflow: "hidden" }}>
+      <span style={{ display: "block", width: `${w}%`, height: "100%", background: color, borderRadius: "0 3px 3px 0" }} />
+    </span>
+  );
+}
+
+function Empty({ what }) {
+  return <div style={{ fontSize: 11, color: DIM, fontStyle: "italic", padding: "8px 0" }}>No data for {what} in this build. The panel is intentionally blank rather than showing stale numbers.</div>;
+}
+
+function HomeTab({ d, mobile }) {
+  if (!d) return <div style={{ fontSize: 12, color: DIM }}>dashboard.json not found. Run make_dashboard.py.</div>;
+  const row = { display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: `1px solid ${BORDER}` };
+  const nameCell = { width: mobile ? 92 : 118, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+  const numCell = { width: 40, textAlign: "right", fontSize: 12, fontFamily: MONO };
+  const chip = (v) => {
+    const a = Math.min(Math.abs(v) / 1.6, 1);
+    return v >= 0 ? `rgba(59,130,246,${(0.16 + a * 0.6).toFixed(2)})` : `rgba(239,68,68,${(0.16 + a * 0.6).toFixed(2)})`;
+  };
+  const maxLam = Math.max(...d.c1.flatMap(f => f.rows.map(r => r.lam)), 1);
+  const maxEase = Math.max(...d.c3.map(t => Math.abs(t.ease)), 1);
+  const maxX3 = Math.max(...d.c4.map(r => r.x3), 1);
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "baseline", marginBottom: 12 }}>
+        <span style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>Gameweek {d.gw}</span>
+        <span style={{ fontSize: 11, color: DIM }}>market pulled {String(d.built_at).slice(0, 10)} · projection {String(d.proj_generated).slice(0, 10)}</span>
+      </div>
+
+      <Panel n="01" title="Implied goal rate by team" sub={`Expected goals each side scores, solved jointly from Kalshi match and totals prices. Grouped by fixture, highest first.`} mobile={mobile}>
+        {d.c1.map(f => (
+          <div key={f.fx} style={{ display: "grid", gridTemplateColumns: mobile ? "72px 1fr" : "84px 1fr", gap: 10, alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${BORDER}` }}>
+            <div style={{ fontSize: 10, color: DIM, fontFamily: MONO }}>{f.fx}</div>
+            <div>
+              {f.rows.map(r => (
+                <div key={r.t} style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0" }}>
+                  <span style={{ width: 34, fontSize: 11, fontWeight: 700 }}>{r.t}</span>
+                  <Bar v={r.lam} max={maxLam} color={H_BLUE} />
+                  <span style={{ width: 30, textAlign: "right", fontSize: 11, fontFamily: MONO }}>{r.lam.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </Panel>
+
+      <Panel n="02" title="Clean sheet probability" sub="Market-implied, highest first. All 20 teams." mobile={mobile}>
+        {d.c2.map(r => (
+          <div key={r.t + r.opp} style={row}>
+            <span style={{ width: 34, fontSize: 11, fontWeight: 700 }}>{r.t}</span>
+            <span style={{ width: mobile ? 52 : 64, fontSize: 10, color: DIM }}>{r.ha} v {r.opp}</span>
+            <Bar v={r.cs} max={0.5} color={H_GREEN} />
+            <span style={numCell}>{(r.cs * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </Panel>
+
+      <Panel n="03" title="Fixture ease, next three gameweeks" sub={`Expected goals scored minus conceded. Easiest first. ${d.notes.ease}.`} mobile={mobile}>
+        {d.c3.map(t => (
+          <div key={t.t} style={{ display: "grid", gridTemplateColumns: mobile ? "34px 60px 1fr" : "40px 88px 1fr", gap: 8, alignItems: "center", padding: "5px 0", borderBottom: `1px solid ${BORDER}` }}>
+            <div style={{ fontSize: 11, fontWeight: 700 }}>{t.t}</div>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <span style={{ width: "50%", display: "flex", justifyContent: "flex-end" }}>{t.ease < 0 && <span style={{ height: 11, width: `${(Math.abs(t.ease) / maxEase) * 100}%`, background: H_RED, borderRadius: "2px 0 0 2px" }} />}</span>
+              <span style={{ width: "50%" }}>{t.ease >= 0 && <span style={{ display: "block", height: 11, width: `${(t.ease / maxEase) * 100}%`, background: H_BLUE, borderRadius: "0 2px 2px 0" }} />}</span>
+            </div>
+            <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+              {t.fx.map(f => (
+                <span key={f.gw} title={`GW${f.gw} ${f.ha} v ${f.opp}: ${f.lf} for, ${f.la} against`}
+                  style={{ fontSize: 9.5, padding: "2px 5px", borderRadius: 3, background: chip(f.d), color: TEXT, fontFamily: MONO, whiteSpace: "nowrap" }}>
+                  {f.opp}{f.ha === "A" ? <span style={{ color: DIM }}>·a</span> : ""}
+                </span>
+              ))}
+              <span style={{ fontSize: 10, color: DIM, marginLeft: 2, fontFamily: MONO }}>{t.ease > 0 ? "+" : ""}{t.ease.toFixed(2)}</span>
+            </div>
+          </div>
+        ))}
+      </Panel>
+
+      <Panel n="04" title="Top 15 by expected points, next three gameweeks" sub="Model xPts. Fixture rates for the next gameweek are market-anchored." mobile={mobile}>
+        {d.c4.map((r, i) => (
+          <div key={r.n + r.t} style={row}>
+            <span style={{ width: 18, fontSize: 10, color: DIM, fontFamily: MONO }}>{i + 1}</span>
+            <span style={nameCell}>{r.n}</span>
+            <span style={{ width: 30, fontSize: 10, color: DIM }}>{r.t}</span>
+            <span style={{ width: 28, fontSize: 10, color: DIM }}>{r.pos}</span>
+            <span style={{ width: 30, fontSize: 10, color: DIM, fontFamily: MONO }}>{r.pr.toFixed(1)}</span>
+            {!mobile && <span style={{ width: 40, fontSize: 10, color: DIM, fontFamily: MONO }}>{r.own.toFixed(1)}%</span>}
+            <Bar v={r.x3} max={maxX3} color={H_BLUE} />
+            <span style={numCell}>{r.x3.toFixed(1)}</span>
+          </div>
+        ))}
+      </Panel>
+
+      <Panel n="05" title={`Gameweek ${d.gw - 1} outliers`} sub="Highest by each measure. Read threat next to xG: high xG on low threat is one big chance and does not repeat." mobile={mobile}>
+        {(!d.c5 || !d.c5.dc || !d.c5.dc.length) ? <Empty what="last gameweek" /> : (
+          <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(3,minmax(0,1fr))", gap: 10 }}>
+            {[["xG + xA", d.c5.xgi, H_BLUE], ["Defensive contribution", d.c5.dc, H_GREEN], ["Opta threat", d.c5.threat, H_AMBER]].map(([label, list, col]) => (
+              <div key={label} style={{ background: "#0a1424", borderRadius: 8, padding: "9px 11px" }}>
+                <div style={{ fontSize: 10, color: DIM, marginBottom: 7 }}>{label}</div>
+                {(list || []).map(p => (
+                  <div key={p.n} style={{ display: "flex", justifyContent: "space-between", gap: 6, padding: "3px 0" }}>
+                    <span style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.n} <span style={{ color: DIM, fontSize: 9 }}>{p.t}</span></span>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: MONO, color: col }}>{p.v}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ fontSize: 10, color: "#475569", marginTop: 9, lineHeight: 1.5, fontStyle: "italic" }}>{d.notes.threat}</div>
+      </Panel>
+
+      <Panel n="06" title="Anytime goalscorer" sub={`Bookmaker odds via The Odds API — ${d.notes.goalscorer}.`} mobile={mobile}>
+        {(!d.c6 || !d.c6.length) ? <Empty what="anytime goalscorer" /> : d.c6.map(r => (
+          <div key={r.n + r.fx} style={row}>
+            <span style={nameCell}>{r.n}</span>
+            <span style={{ width: 62, fontSize: 10, color: DIM, fontFamily: MONO }}>{r.fx}</span>
+            <Bar v={r.p} max={0.8} color={H_AMBER} />
+            <span style={numCell}>{(r.p * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </Panel>
+
+      <Panel n="07" title="Availability" sub="Ruled out ranked by ownership; doubtful ranked by expected points at risk over the next three gameweeks." mobile={mobile}>
+        <div style={{ fontSize: 10, color: H_RED, marginBottom: 5, fontWeight: 700 }}>Ruled out</div>
+        <ul style={{ margin: "0 0 12px", paddingLeft: 17, fontSize: 12, lineHeight: 1.7 }}>
+          {(d.inj.out || []).map(r => (
+            <li key={r.n} style={{ marginBottom: 3 }}>
+              <span style={{ fontWeight: 700 }}>{r.n}</span> <span style={{ color: DIM, fontSize: 10 }}>{r.t}</span> — <span style={{ color: DIM }}>{r.news}</span>
+              <span style={{ color: "#475569", fontSize: 10 }}> · {r.own.toFixed(1)}% owned</span>
+            </li>
+          ))}
+        </ul>
+        <div style={{ fontSize: 10, color: H_AMBER, marginBottom: 5, fontWeight: 700 }}>Doubtful</div>
+        <ul style={{ margin: 0, paddingLeft: 17, fontSize: 12, lineHeight: 1.7 }}>
+          {(d.inj.doubtful || []).map(r => (
+            <li key={r.n} style={{ marginBottom: 3 }}>
+              <span style={{ fontWeight: 700 }}>{r.n}</span> <span style={{ color: DIM, fontSize: 10 }}>{r.t}</span> — <span style={{ color: DIM }}>{r.news}</span>
+              <span style={{ color: "#475569", fontSize: 10 }}> · {r.own.toFixed(1)}% owned · {r.risk.toFixed(1)} xPts at risk</span>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+    </div>
+  );
+}
+
 // ─── MAIN APP ────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [tab, setTab] = useState("table");
+  const [tab, setTab] = useState("home");
+  const [dash, setDash] = useState(null);
   const [riskMode, setRiskMode] = useState("balanced");
   const [posFilter, setPosFilter] = useState("ALL");
   const [sortBy, setSortBy] = useState("displayPts");
@@ -2602,8 +2772,10 @@ export default function App() {
       fetch("/data/analytics.json").then(r => r.ok ? r.json() : null).catch(() => null), // optional
       fetch("/data/lineups.json").then(r => r.ok ? r.json() : null).catch(() => null), // optional
       fetch("/data/news.json").then(r => r.ok ? r.json() : null).catch(() => null), // optional
+      fetch("/data/dashboard.json").then(r => r.ok ? r.json() : null).catch(() => null), // optional
     ])
-      .then(([players, a, l, nw]) => {
+      .then(([players, a, l, nw, dsh]) => {
+        setDash(dsh);
         // players.json may be a bare array (legacy) or { generated_at, players }
         const arr = Array.isArray(players) ? players : players.players;
         // the file states its own horizon; fall back to the length of the first xpGW array
@@ -2751,7 +2923,7 @@ export default function App() {
     </div>);
   if (!rawPlayers) return loaderOverlay;
 
-  const TABS = [["table","📊 Players"],["planner","🧑‍💼 Planner"],["xi","⚽ Fantasy XI"],["squads","🧮 Squad Strategies"],["tiers","🏆 Tiers"],["odds","🎲 Odds"],["method","🔬 Method"]];
+  const TABS = [["home","🏠 Home"],["table","📊 Players"],["planner","🧑‍💼 Planner"],["xi","⚽ Fantasy XI"],["squads","🧮 Squad Strategies"],["tiers","🏆 Tiers"],["odds","🎲 Odds"],["method","🔬 Method"]];
   return (
     <div style={{ background:BG, minHeight:"100vh", color:TEXT, fontFamily:SANS, fontSize:mobile?14:13, fontVariantNumeric:"tabular-nums" }}>
       <GlobalCSS />
@@ -2791,6 +2963,7 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth:1240, margin:"0 auto", padding:mobile?"14px 12px 40px":"16px 16px 40px" }}>
+        {tab==="home" && <HomeTab d={dash} mobile={mobile} />}
         {tab==="table" && <PlayerTableTab {...{ players, selected, setSelected, riskMode, setRiskMode,
           posFilter, setPosFilter, sortBy, setSortBy, search, setSearch, ownMax, setOwnMax, priceMax, setPriceMax, mispricedOnly, setMispricedOnly,
           F, setF, showFilters, setShowFilters, allPlayers: rawPlayers, mobile, dataTimestamp, watch, toggleWatch }} />}
