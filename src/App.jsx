@@ -2313,6 +2313,141 @@ function ScreenshotImport({ pool, onApply, mobile }) {
   );
 }
 
+// ─── TAB: FIXTURES ─────────────────────────────────────────────────────────────
+// Fixture difficulty split by what the player actually needs from the fixture.
+//
+// A single FDR number is the wrong shape. An attacker wants an opponent that
+// concedes; a defender wants an opponent that does not create. Those are different
+// questions and for some fixtures they point opposite ways — Man City away at
+// Manchester United is a fine attacking fixture and a poor defensive one.
+//
+// Both scales come from the model's own per-fixture goal rates, which already carry
+// opponent strength, home advantage and (for the next gameweek) the betting market:
+//   ATT = lamFor, this team's expected goals   — higher is better
+//   DEF = lamAg,  this team's expected goals conceded — lower is better
+// That is the same thing as "who concedes a lot" and "who creates little", but
+// fixture-specific rather than a season average, so venue is priced in.
+
+// FPL-style five-step ramp, dark green (easy) → dark red (hard).
+const FDR_RAMP = ["#0e7a4a", "#2fa96a", "#8a8f98", "#d97b45", "#c0392b"];
+function fdrBucket(v, lo, hi, invert) {
+  if (!Number.isFinite(v) || hi <= lo) return 2;
+  let t = (v - lo) / (hi - lo);              // 0 = lo, 1 = hi
+  if (invert) t = 1 - t;                      // for DEF, low conceded = easy
+  return Math.max(0, Math.min(4, Math.floor((1 - t) * 5)));
+}
+
+function FixturesTab({ pool, mobile }) {
+  const [mode, setMode] = useState("att");     // att | def
+  const [sortBy, setSortBy] = useState("total");
+
+  // one row per club, pulled from any player of that club
+  const rows = useMemo(() => {
+    const byTeam = {};
+    for (const p of pool || []) {
+      if (!p.nat || byTeam[p.nat]) continue;
+      const fx = (p.fixtures || []).slice().sort((a, b) => a.md - b.md);
+      if (fx.length) byTeam[p.nat] = { code: p.nat, team: p.team, fx };
+    }
+    return Object.values(byTeam);
+  }, [pool]);
+
+  // shared colour scale across every club and gameweek on screen
+  const { loF, hiF, loA, hiA } = useMemo(() => {
+    const F = [], A = [];
+    rows.forEach(r => r.fx.forEach(f => {
+      if (Number.isFinite(f.lamFor)) F.push(f.lamFor);
+      if (Number.isFinite(f.lamAg)) A.push(f.lamAg);
+    }));
+    const q = (arr, p) => { if (!arr.length) return 0; const s = arr.slice().sort((a, b) => a - b); return s[Math.floor((s.length - 1) * p)]; };
+    return { loF: q(F, 0.08), hiF: q(F, 0.92), loA: q(A, 0.08), hiA: q(A, 0.92) };
+  }, [rows]);
+
+  const val = (f) => mode === "att" ? f.lamFor : f.lamAg;
+  const total = (r) => r.fx.reduce((s, f) => s + (val(f) || 0), 0);
+  const sorted = useMemo(() => {
+    const c = rows.slice();
+    if (sortBy === "total") c.sort((a, b) => mode === "att" ? total(b) - total(a) : total(a) - total(b));
+    else if (sortBy === "next") c.sort((a, b) => mode === "att" ? (val(b.fx[0]) || 0) - (val(a.fx[0]) || 0) : (val(a.fx[0]) || 0) - (val(b.fx[0]) || 0));
+    else c.sort((a, b) => a.code.localeCompare(b.code));
+    return c;
+  }, [rows, mode, sortBy, loF, hiF]);
+
+  const btn = (on) => ({ padding: "6px 12px", borderRadius: 6, fontFamily: "inherit", fontSize: 12.5,
+    cursor: "pointer", fontWeight: on ? 700 : 400, border: `1px solid ${on ? "#f97316" : BORDER}`,
+    background: on ? "#f9731618" : "transparent", color: on ? "#f97316" : DIM });
+
+  return (
+    <div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", marginBottom: 2 }}>🗓️ Fixture difficulty</div>
+      <div style={{ fontSize: 12.5, color: DIM, marginBottom: 10, maxWidth: 780, lineHeight: 1.5 }}>
+        Two ratings, because attackers and defenders want different things from a fixture.
+        <b style={{ color: "#cbd5e1" }}> Attack</b> is this club&rsquo;s expected goals — good when the
+        opponent concedes. <b style={{ color: "#cbd5e1" }}> Defence</b> is expected goals conceded — good
+        when the opponent creates little. Both are the model&rsquo;s own per-fixture rates, so venue and
+        opponent strength are already priced in, and {gwLabel(0)} is anchored on the betting market.
+        They disagree often: a fixture can be a fine one to attack and a poor one to keep a clean sheet in.
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
+        <button onClick={() => setMode("att")} style={btn(mode === "att")}>⚔️ Attack</button>
+        <button onClick={() => setMode("def")} style={btn(mode === "def")}>🛡️ Defence</button>
+        <span style={{ width: 10 }} />
+        <span style={{ fontSize: 11, color: DIM }}>sort</span>
+        <button onClick={() => setSortBy("total")} style={btn(sortBy === "total")}>best overall</button>
+        <button onClick={() => setSortBy("next")} style={btn(sortBy === "next")}>best {gwLabel(0)}</button>
+        <button onClick={() => setSortBy("az")} style={btn(sortBy === "az")}>A–Z</button>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center", fontSize: 10, color: DIM }}>
+          easy
+          {FDR_RAMP.map((c, i) => <span key={i} style={{ width: 16, height: 12, background: c, borderRadius: 2 }} />)}
+          hard
+        </span>
+      </div>
+
+      <div style={{ overflowX: "auto", border: `1px solid ${BORDER}`, borderRadius: 10 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: mobile ? 11 : 12 }}>
+          <thead>
+            <tr style={{ background: CARD }}>
+              <th style={{ textAlign: "left", padding: "8px 10px", color: DIM, fontWeight: 600, position: "sticky", left: 0, background: CARD }}>Club</th>
+              {GW_IDX().map(i => <th key={i} style={{ padding: "8px 6px", color: DIM, fontWeight: 600 }}>{gwLabel(i)}</th>)}
+              <th style={{ padding: "8px 10px", color: DIM, fontWeight: 600 }}>{mode === "att" ? "Σ xG" : "Σ xGA"}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(r => (
+              <tr key={r.code} style={{ borderTop: `1px solid ${BORDER}55` }}>
+                <td style={{ padding: "6px 10px", fontWeight: 700, color: "#fff", position: "sticky", left: 0, background: BG, whiteSpace: "nowrap" }}>{r.code}</td>
+                {GW_IDX().map(i => {
+                  const f = r.fx[i];
+                  if (!f) return <td key={i} style={{ padding: 3, textAlign: "center", color: DIM }}>—</td>;
+                  const v = val(f);
+                  const b = mode === "att" ? fdrBucket(v, loF, hiF, false) : fdrBucket(v, loA, hiA, true);
+                  return (
+                    <td key={i} style={{ padding: 3, textAlign: "center" }}>
+                      <div title={`${r.code} ${f.home ? "vs" : "at"} ${f.opponent} · xG ${f.lamFor?.toFixed(2)} · xGA ${f.lamAg?.toFixed(2)} · clean sheet ${(f.csP * 100).toFixed(0)}%`}
+                           style={{ background: FDR_RAMP[b], borderRadius: 5, padding: mobile ? "4px 2px" : "5px 4px", color: "#fff", lineHeight: 1.25 }}>
+                        <div style={{ fontWeight: 700, fontSize: mobile ? 10 : 11 }}>{(f.opponent || "").slice(0, 3).toUpperCase()}{f.home ? "" : " (a)"}</div>
+                        <div style={{ fontSize: mobile ? 9 : 10, opacity: 0.92, fontFamily: MONO }}>{v?.toFixed(2)}</div>
+                      </div>
+                    </td>
+                  );
+                })}
+                <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 700, fontFamily: MONO, color: "#cbd5e1" }}>{total(r).toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 11, color: DIM, marginTop: 8, lineHeight: 1.5 }}>
+        Cell shows the opponent and the rate. Hover for both rates plus the clean-sheet probability.
+        Colour is a percentile ramp across every club and gameweek on screen, so it is a comparison
+        within this window rather than an absolute scale. {gwLabel(0)} rates are anchored on Kalshi;
+        later gameweeks are the model alone, and the model ran about 25% hot on goals in {gwLabel(-1)}.
+      </div>
+    </div>
+  );
+}
+
 const PL_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 };   // 15-man squad shape
 const PL_XI_MAX = { GK: 1, DEF: 5, MID: 5, FWD: 3 };   // max of each position in the starting XI
 const PL_BUDGET = 100;
@@ -3145,7 +3280,7 @@ export default function App() {
     </div>);
   if (!rawPlayers) return loaderOverlay;
 
-  const TABS = [["home","🏠 Home"],["table","📊 Players"],["planner","🧑‍💼 Planner"],["xi","⚽ Fantasy XI"],["squads","🧮 Squad Strategies"],["tiers","🏆 Tiers"],["odds","🎲 Odds"],["method","🔬 Method"]];
+  const TABS = [["home","🏠 Home"],["table","📊 Players"],["fixtures","🗓️ Fixtures"],["planner","🧑‍💼 Planner"],["xi","⚽ Fantasy XI"],["squads","🧮 Squad Strategies"],["tiers","🏆 Tiers"],["odds","🎲 Odds"],["method","🔬 Method"]];
   return (
     <div style={{ background:BG, minHeight:"100vh", color:TEXT, fontFamily:SANS, fontSize:mobile?14:13, fontVariantNumeric:"tabular-nums" }}>
       <GlobalCSS />
@@ -3190,6 +3325,7 @@ export default function App() {
           posFilter, setPosFilter, sortBy, setSortBy, search, setSearch, ownMax, setOwnMax, priceMax, setPriceMax, mispricedOnly, setMispricedOnly,
           F, setF, showFilters, setShowFilters, allPlayers: rawPlayers, mobile, dataTimestamp, watch, toggleWatch }} />}
         {tab==="xi" && <StartingXITab pool={rawPlayers} mobile={mobile} />}
+        {tab==="fixtures" && <FixturesTab pool={rawPlayers} mobile={mobile} />}
         {tab==="planner" && <PlannerTab pool={rawPlayers} mobile={mobile} watch={watch} toggleWatch={toggleWatch} />}
         {tab==="lineups" && <LineupsTab lineups={lineups} pool={rawPlayers} goToPlayer={goToPlayer} mobile={mobile} narrow={narrow} sel={lineupSel} setSel={setLineupSel} cmp={lineupCmp} setCmp={setLineupCmp} />}
         {tab==="news" && <NewsTab news={news} mobile={mobile} />}
