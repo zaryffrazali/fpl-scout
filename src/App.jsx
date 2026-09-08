@@ -493,7 +493,7 @@ function PlayerTableTab({ players, selected, setSelected, riskMode, setRiskMode,
                   <span style={{ color:"#94a3b8" }}>£{p.price}m</span>
                   <span style={{ color:p.E_mins<60?"#eab308":"#94a3b8" }}>{Math.round(p.E_mins)}'</span>
                   <span style={{ color:p.displayPts>15?"#f97316":p.displayPts>11?"#22c55e":TEXT, fontWeight:700 }}>xPTS {p.displayPts.toFixed(1)}</span>
-                  <span style={{ color:"#7b8cde" }} title="GW1·GW2·GW3 xPts">GW {mdScore(p,0).pts.toFixed(1)}·{mdScore(p,1).pts.toFixed(1)}·{mdScore(p,2).pts.toFixed(1)}</span>
+                  <span style={{ color:"#7b8cde" }} title={`${GW_IDX().map(gwLabel).join("·")} xPts`}>GW {GW_IDX().map(i=>mdScore(p,i).pts.toFixed(1)).join("·")}</span>
                   <span style={{ color:"#94a3b8" }} title={`xPts per £m over ${spanLabel()}`}>{(p.value||0).toFixed(2)}/£m</span>
                   <span>Own {p.own}%</span>
                 </div>
