@@ -2593,21 +2593,112 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     return Math.round(t * 10) / 10;
   };
 
-  // suggested transfers for current MD: best same-position upgrade per squad player, within budget
+  // ── Suggested transfers ──────────────────────────────────────────────────────
+  // Four rules, each fixing a way the old version produced nonsense:
+  //
+  //  1. GAIN IS BEST-XI OVER THE REST OF THE HORIZON, not one gameweek. A transfer
+  //     costs a free transfer or 4 points, so a single-gameweek delta is the wrong
+  //     unit. Scoring the best legal XI also means an upgrade to a player who only
+  //     ever sits on your bench correctly scores zero.
+  //  2. LEGALITY IS CHECKED. The old version had no club-count test and would
+  //     happily propose a fourth player from the same club.
+  //  3. THE INCOMING PLAYER MUST BE PLAYING. status 'a', not flagged, and a start
+  //     probability floor — a fringe player with one juicy fixture is noise.
+  //  4. SAME-BRACKET SWAPS RANK FIRST. Ranking on raw xP with only an affordability
+  //     cap degenerates into "buy the most expensive player you can afford", which
+  //     is a way of spending the bank rather than a transfer suggestion.
+  //
+  // Each row is an INDEPENDENT single swap from the squad as it stands; the list is
+  // deduplicated on both sides so it reads as alternatives, not a combinable plan.
+  const SIDEWAYS = 0.5;     // £m — within this, treat as the same price bracket
+  const MIN_GAIN = 0.8;     // xP over the horizon; below this it is model noise
+  const MIN_EFF = 0.8;      // xP per £m spent, required of money-spending upgrades
+
   const suggestions = useMemo(() => {
-    if (sp.length < 11) return [];
-    const out = [];
-    sp.forEach(o => {
-      const cand = (pool || []).filter(c => c.pos === o.pos && !squad.includes(c.id) && c.price <= remaining + o.price + 1e-9)
-        .map(c => ({ c, gain: +(ptsOf(c, md) - ptsOf(o, md)).toFixed(1) }))
-        .sort((a, b) => b.gain - a.gain)[0];
-      if (cand && cand.gain > 0.3) out.push({ outP: o, inP: cand.c, gain: cand.gain });
+    if (sp.length < 11 || !pool) return [];
+    const rest = GW_IDX().filter(i => i >= md);            // this gameweek onward
+    const clubs = {};
+    sp.forEach(p => { clubs[p.nat] = (clubs[p.nat] || 0) + 1; });
+
+    // Best legal XI total across `rest`, given per-gameweek per-position xP arrays.
+    const xiTotal = (byGw) => {
+      let tot = 0;
+      for (const by of byGw) {
+        let best = 0;
+        for (const [d, m, f] of PL_FORMS) {
+          if (!by.GK.length || by.DEF.length < d || by.MID.length < m || by.FWD.length < f) continue;
+          let t = by.GK[0];
+          for (let k = 0; k < d; k++) t += by.DEF[k];
+          for (let k = 0; k < m; k++) t += by.MID[k];
+          for (let k = 0; k < f; k++) t += by.FWD[k];
+          if (t > best) best = t;
+        }
+        tot += best;
+      }
+      return tot;
+    };
+    const groupSorted = (players) => rest.map(mi => {
+      const by = { GK: [], DEF: [], MID: [], FWD: [] };
+      players.forEach(p => by[p.pos].push(mdScore(p, mi).pts));
+      for (const k in by) by[k].sort((a, b) => b - a);
+      return by;
     });
-    return out.sort((a, b) => b.gain - a.gain).slice(0, 5);
+    const base = xiTotal(groupSorted(sp));
+
+    // A candidate must be an available, nailed player who keeps the squad legal.
+    const eligible = (c, o) => {
+      if (c.pos !== o.pos || squad.includes(c.id)) return false;
+      if (c.status !== "a" || (c.availability ?? 1) < 0.75) return false;
+      if ((c.startProb ?? 0) < 0.6) return false;
+      if (c.price > remaining + o.price + 1e-9) return false;
+      if (c.nat !== o.nat && (clubs[c.nat] || 0) >= 3) return false;   // max 3 per club
+      return true;
+    };
+
+    const rows = [];
+    sp.forEach(o => {
+      // Everything except `o`, grouped once, so each candidate is one insertion.
+      const without = groupSorted(sp.filter(p => p.id !== o.id));
+      pool.forEach(c => {
+        if (!eligible(c, o)) return;
+        const byGw = without.map((by, k) => {
+          const arr = by[c.pos].slice();
+          const v = mdScore(c, rest[k]).pts;
+          let i = 0; while (i < arr.length && arr[i] > v) i++;
+          arr.splice(i, 0, v);
+          return { ...by, [c.pos]: arr };
+        });
+        const gain = +(xiTotal(byGw) - base).toFixed(1);
+        if (gain < MIN_GAIN) return;
+        const dPrice = +(c.price - o.price).toFixed(1);
+        const eff = dPrice > 0 ? gain / dPrice : Infinity;
+        if (dPrice > SIDEWAYS && eff < MIN_EFF) return;   // a lot of money for very little
+        rows.push({ outP: o, inP: c, gain, dPrice, eff, gwGain: +(ptsOf(c, md) - ptsOf(o, md)).toFixed(1) });
+      });
+    });
+
+    // Same-bracket and money-freeing swaps claim their players first — that is the
+    // priority — then money-spending upgrades fill the remaining places by efficiency.
+    const used = new Set(), picked = [];
+    const claim = (list) => list.forEach(r => {
+      if (picked.length >= 6 || used.has(r.inP.id) || used.has(r.outP.id)) return;
+      picked.push(r); used.add(r.inP.id); used.add(r.outP.id);
+    });
+    claim(rows.filter(r => r.dPrice <= SIDEWAYS).sort((a, b) => b.gain - a.gain));
+    claim(rows.filter(r => r.dPrice > SIDEWAYS).sort((a, b) => b.eff - a.eff || b.gain - a.gain));
+    return picked;
   }, [squad, md, remaining, pool]); // eslint-disable-line
 
   const applySwap = (outId, inId) => {
-    const inP = byId[inId]; if (!inP) return;
+    const inP = byId[inId], outP = byId[outId]; if (!inP || !outP) return;
+    // Suggestions are scored one at a time against the squad as it stands, so applying
+    // two of them in sequence can still break a rule. Re-check here, at the moment the
+    // squad actually changes, rather than trusting the row that produced it.
+    const after = sp.filter(p => p.id !== outId).concat(inP);
+    const clubN = after.filter(p => p.nat === inP.nat).length;
+    if (clubN > 3) { alert(`That would give you ${clubN} ${inP.team} players — the limit is 3.`); return; }
+    const over = +(after.reduce((s, p) => s + p.price, 0) - PL_BUDGET).toFixed(1);
+    if (over > 0) { alert(`That is £${over}m over budget.`); return; }
     const wasStarter = starters.includes(outId), wasCap = captain === outId;
     setSquad(squad.map(x => x === outId ? inId : x));
     setStarters(prev => wasStarter ? prev.map(x => x === outId ? inId : x) : prev);
@@ -2848,19 +2939,30 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
 
       {/* suggested transfers */}
       <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: 12, marginTop: 6 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 6 }}>💡 Suggested transfers — {gwLabel(md)} (by xP gain · 🔍 = scout upgrade)</div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 2 }}>💡 Suggested transfers — {gwLabel(md)}–{gwLabel(HORIZON - 1)} (🔍 = scout upgrade)</div>
+        <div style={{ fontSize: 10, color: DIM, marginBottom: 7 }}>
+          Gain is the change in your <b>best legal XI</b> summed over {gwLabel(md)}–{gwLabel(HORIZON - 1)}, so an upgrade that only ever sits on your bench scores nothing.
+          Same-bracket swaps (within £{SIDEWAYS}m) are listed first. Each row is an independent single swap, checked for the 3-per-club limit and availability.
+        </div>
         {sp.length < 11 ? <div style={{ fontSize: 12, color: DIM }}>Fill your squad to see transfer suggestions.</div>
-          : suggestions.length === 0 ? <div style={{ fontSize: 12, color: DIM }}>No positive-value swaps within budget — your squad looks optimal for {gwLabel(md)}.</div>
-            : suggestions.map((sg, i) => (
+          : suggestions.length === 0 ? <div style={{ fontSize: 12, color: DIM }}>No swap gains more than {MIN_GAIN} xP over {gwLabel(md)}–{gwLabel(HORIZON - 1)} — your squad looks optimal, and anything smaller than that is inside the model&rsquo;s error.</div>
+            : suggestions.map((sg, i) => {
+              const side = sg.dPrice <= SIDEWAYS;
+              return (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: i ? `1px solid ${BORDER}33` : "none", fontSize: 12, flexWrap: "wrap" }}>
-                <span style={{ color: "#ff8c42", flex: "1 1 120px" }}>OUT {sg.outP.name} <span style={{ color: DIM }}>({ptsOf(sg.outP, md)})</span></span>
-                <span style={{ color: "#4ade80", flex: "1 1 120px" }}>IN {sg.inP.name} {scoutEligible(sg.inP) && "🔍"} <span style={{ color: DIM }}>({ptsOf(sg.inP, md)}, £{sg.inP.price}m)</span></span>
-                <span style={{ color: "#f97316", fontWeight: 700 }}>+{sg.gain}</span>
+                <span title={side ? (sg.dPrice < -0.05 ? "Frees money" : "Same price bracket") : "Costs money"}
+                  style={{ fontFamily: MONO, fontSize: 9, padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap", color: side ? "#4ade80" : "#eab308", border: `1px solid ${side ? "#4ade8055" : "#eab30855"}` }}>
+                  {sg.dPrice > 0 ? `+£${sg.dPrice.toFixed(1)}m` : sg.dPrice < 0 ? `−£${Math.abs(sg.dPrice).toFixed(1)}m` : "£0.0m"}
+                </span>
+                <span style={{ color: "#ff8c42", flex: "1 1 120px" }}>OUT {sg.outP.name} <span style={{ color: DIM }}>(£{sg.outP.price}m)</span></span>
+                <span style={{ color: "#4ade80", flex: "1 1 120px" }}>IN {sg.inP.name} {scoutEligible(sg.inP) && "🔍"} <span style={{ color: DIM }}>(£{sg.inP.price}m)</span></span>
+                <span title={`+${sg.gain} xP over ${gwLabel(md)}–${gwLabel(HORIZON - 1)} · ${sg.gwGain >= 0 ? "+" : ""}${sg.gwGain} in ${gwLabel(md)} alone`}
+                  style={{ color: "#f97316", fontWeight: 700, fontFamily: MONO }}>+{sg.gain.toFixed(1)}</span>
                 <button onClick={() => applySwap(sg.outP.id, sg.inP.id)} style={{ ...btn(false), padding: "4px 8px" }}>apply</button>
               </div>
-            ))}
+            ); })}
       </div>
-      <div style={{ fontSize: 10, color: "#475569", marginTop: 10, fontStyle: "italic" }}>xP projections reuse the dashboard model (per-MD fixture odds, role shift, minutes) and include a projected scout bonus (+2 if &lt;5% owned and &gt;4 pts). Plan only — verify against the AI Lineups and News tabs.</div>
+      <div style={{ fontSize: 10, color: "#475569", marginTop: 10, fontStyle: "italic" }}>xP projections reuse the dashboard model (per-MD fixture odds, role shift, minutes) and include a projected scout bonus (+2 if &lt;5% owned and &gt;4 pts). Suggestions ignore the 4-point hit and the value of holding a free transfer — a gain under about 4 is not worth taking a hit for. Plan only — verify against the AI Lineups and News tabs.</div>
     </div>
   );
 }
