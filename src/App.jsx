@@ -2806,19 +2806,38 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
             </label>
             <span style={{ fontSize: 10, color: DIM }}>affordable ≤ ${remaining}m</span>
           </div>
-          {(() => { const cap = pickMax !== "" ? Math.min(remaining, +pickMax || 0) : remaining; return (
+          {(() => { const cap = pickMax !== "" ? Math.min(remaining, +pickMax || 0) : remaining;
+            const q = pickQ.trim().toLowerCase();
+            // Never silently drop a player. Filtering the unaffordable OUT made the tool look
+            // like it did not know them: with a full squad and £0.2m banked, searching "Hall"
+            // returned nothing even though he is the 24th-best defender in the file. Show them,
+            // greyed, with the shortfall — and lift the 40-row cap whenever a search is active.
+            const all = (pool || [])
+              .filter(p => p.pos === pickPos && !squad.includes(p.id))
+              .filter(p => !q || p.name.toLowerCase().includes(q) || p.team.toLowerCase().includes(q))
+              .map(p => ({ p, s: ptsOf(p, md), over: +(p.price - cap).toFixed(1) }))
+              .sort((a, b) => (a.over > 0) - (b.over > 0) || b.s - a.s);
+            const shown = q ? all.slice(0, 120) : all.slice(0, 40);
+            const hidden = all.length - shown.length;
+            return (
           <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-            {(pool || []).filter(p => p.pos === pickPos && !squad.includes(p.id) && p.price <= cap + 1e-9)
-              .filter(p => { const s = pickQ.toLowerCase(); return !s || p.name.toLowerCase().includes(s) || p.team.toLowerCase().includes(s); })
-              .map(p => ({ p, s: ptsOf(p, md) })).sort((a, b) => b.s - a.s).slice(0, 40)
-              .map(({ p, s }) => (
-                <div key={p.id} onClick={() => addPlayer(p)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, cursor: "pointer", border: `1px solid ${BORDER}33` }}>
+            {shown.length === 0 && <div style={{ fontSize: 12, color: DIM, padding: "10px 4px" }}>No {pickPos} matches “{pickQ}”.</div>}
+            {shown.map(({ p, s, over }) => {
+                const afford = over <= 0;
+                return (
+                <div key={p.id} onClick={() => afford && addPlayer(p)}
+                     title={afford ? "" : `£${over}m more than you have — remove someone first`}
+                     style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6,
+                              cursor: afford ? "pointer" : "not-allowed", opacity: afford ? 1 : 0.45,
+                              border: `1px solid ${BORDER}33` }}>
                   <span style={{ color: "#fff", fontSize: 13, fontWeight: 600, flex: "1 1 auto", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{flagOf(p)} {p.name} {scoutEligible(p) && "🔍"}</span>
                   <span style={{ fontSize: 11, color: DIM }}>{p.team}</span>
-                  <span style={{ fontSize: 11, color: "#94a3b8" }}>£{p.price}m</span>
+                  <span style={{ fontSize: 11, color: afford ? "#94a3b8" : "#eab308" }}>£{p.price}m{afford ? "" : ` (+${over})`}</span>
                   <span style={{ fontSize: 12, color: s > 6 ? "#f97316" : s > 4 ? "#22c55e" : DIM, fontWeight: 700, width: 34, textAlign: "right" }}>{s}</span>
                 </div>
-              ))}
+              ); })}
+            {hidden > 0 && <div style={{ fontSize: 10.5, color: DIM, padding: "4px 6px" }}>
+              {hidden} more — {q ? "narrow the search" : "type a name to see the rest"}</div>}
           </div>
           ); })()}
         </div>
