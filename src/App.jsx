@@ -2892,21 +2892,28 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
             <input autoFocus placeholder="Search player or team…" value={pickQ} onChange={e => setPickQ(e.target.value)} style={{ flex: "1 1 160px", minWidth: 0, background: "#0a121f", border: `1px solid ${BORDER}`, borderRadius: 6, padding: "8px 10px", color: TEXT, fontFamily: "inherit", fontSize: 13 }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: DIM, whiteSpace: "nowrap" }}>Max £
-              <input type="number" min="0" step="0.1" placeholder={`${remaining}`} value={pickMax} onChange={e => setPickMax(e.target.value)} style={{ width: 64, background: "#0a121f", border: `1px solid ${BORDER}`, borderRadius: 6, padding: "8px 8px", color: TEXT, fontFamily: "inherit", fontSize: 13 }} />m
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: DIM, whiteSpace: "nowrap" }} title="Hide players above this price. This is a display filter only — it does not change what you can afford.">Max £
+              <input type="number" min="0" step="0.1" placeholder="any" value={pickMax} onChange={e => setPickMax(e.target.value)} style={{ width: 64, background: "#0a121f", border: `1px solid ${BORDER}`, borderRadius: 6, padding: "8px 8px", color: TEXT, fontFamily: "inherit", fontSize: 13 }} />m
             </label>
-            <span style={{ fontSize: 10, color: DIM }}>affordable ≤ ${remaining}m</span>
+            <span style={{ fontSize: 10, color: DIM }}>you can afford ≤ £{remaining}m</span>
           </div>
-          {(() => { const cap = pickMax !== "" ? Math.min(remaining, +pickMax || 0) : remaining;
+          {(() => {
+            // Two SEPARATE numbers. `budget` is what you can afford and only greys a row out;
+            // `ceiling` is the Max £ box, a pure display filter. They used to be collapsed into
+            // one `Math.min(remaining, pickMax)`, which meant the Max £ box could only ever
+            // make the list smaller: typing 8 with £4.8m banked still capped everything at 4.8,
+            // so Hall at £5.1m stayed invisible no matter what you typed.
+            const budget = remaining;
+            const ceiling = pickMax !== "" && +pickMax > 0 ? +pickMax : Infinity;
             const q = pickQ.trim().toLowerCase();
             // Never silently drop a player. Filtering the unaffordable OUT made the tool look
             // like it did not know them: with a full squad and £0.2m banked, searching "Hall"
             // returned nothing even though he is the 24th-best defender in the file. Show them,
             // greyed, with the shortfall — and lift the 40-row cap whenever a search is active.
             const all = (pool || [])
-              .filter(p => p.pos === pickPos && !squad.includes(p.id))
+              .filter(p => p.pos === pickPos && !squad.includes(p.id) && p.price <= ceiling + 1e-9)
               .filter(p => !q || p.name.toLowerCase().includes(q) || p.team.toLowerCase().includes(q))
-              .map(p => ({ p, s: ptsOf(p, md), over: +(p.price - cap).toFixed(1) }))
+              .map(p => ({ p, s: ptsOf(p, md), over: +(p.price - budget).toFixed(1) }))
               .sort((a, b) => (a.over > 0) - (b.over > 0) || b.s - a.s);
             const shown = q ? all.slice(0, 120) : all.slice(0, 40);
             const hidden = all.length - shown.length;
