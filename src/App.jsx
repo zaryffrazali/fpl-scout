@@ -2468,17 +2468,21 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   const [pickPos, setPickPos] = useState(null);
   const [pickQ, setPickQ] = useState("");
   const [pickMax, setPickMax] = useState("");   // optional max-price cap in the picker
+  // Your real budget is squad value + bank, which drifts from £100m as prices move and is
+  // computed from SELL prices, not the now_cost this file carries. So it is editable, and
+  // going over it is allowed — the planner warns, it does not block. See addPlayer.
+  const [budget, setBudget] = useState(init.budget ?? PL_BUDGET);
   const [pngBusy, setPngBusy] = useState(false);
   const [menuId, setMenuId] = useState(null);        // pitch player whose action menu is open
   const [subbingId, setSubbingId] = useState(null);  // starter being subbed out (awaiting bench pick)
 
   useEffect(() => {
-    try { localStorage.setItem(PL_KEY, JSON.stringify({ squad, starters, captain, viceCaptain, transfers })); } catch { /* private mode */ }
-  }, [squad, starters, captain, viceCaptain, transfers]);
+    try { localStorage.setItem(PL_KEY, JSON.stringify({ squad, starters, captain, viceCaptain, transfers, budget })); } catch { /* private mode */ }
+  }, [squad, starters, captain, viceCaptain, transfers, budget]);
 
   const sp = squad.map(id => byId[id]).filter(Boolean);
   const spent = +sp.reduce((s, p) => s + p.price, 0).toFixed(1);
-  const remaining = +(PL_BUDGET - spent).toFixed(1);
+  const remaining = +(budget - spent).toFixed(1);
   const countPos = (pos) => sp.filter(p => p.pos === pos).length;
   const benchPlayers = sp.filter(p => !starters.includes(p.id));
 
@@ -2489,9 +2493,12 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
 
   const addPlayer = (p) => {
     if (squad.includes(p.id)) return;
-    if (countPos(p.pos) >= PL_LIMITS[p.pos]) return;
-    if (squad.length >= 15) return;
-    if (p.price > remaining + 1e-9) return;
+    if (countPos(p.pos) >= PL_LIMITS[p.pos]) return;   // 2/5/5/3 — a real FPL rule
+    if (squad.length >= 15) return;                    // 15 players — a real FPL rule
+    // NO PRICE CHECK. The planner's budget is an estimate: it prices your squad at
+    // now_cost, whereas FPL sells at your own sell price, so the bank shown here can be
+    // wrong by a pound or more. Blocking on it stopped people picking players they could
+    // actually afford. Over-budget is shown in red instead — a warning, not a wall.
     setSquad([...squad, p.id]);
     if (pendingOut > 0) { setPendingOut(pendingOut - 1); setTransfers(t => t + 1); }   // completing a swap on a full squad
   };
@@ -2577,7 +2584,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     const cntP = pos => sq.map(id => byId[id]).filter(p => p && p.pos === pos).length;
     let guard = 0;
     while (sq.length < 15 && guard++ < 80) {
-      const rem = PL_BUDGET - sq.reduce((s, id) => s + priceOf(id), 0);
+      const rem = budget - sq.reduce((s, id) => s + priceOf(id), 0);
       const reserve = (15 - sq.length - 1) * 3.9;   // keep enough for the cheapest remaining fills
       const cands = (pool || []).filter(p => !sq.includes(p.id) && cntP(p.pos) < PL_LIMITS[p.pos] && p.price <= rem - reserve + 1e-9);
       if (!cands.length) break;
@@ -2696,9 +2703,9 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     // squad actually changes, rather than trusting the row that produced it.
     const after = sp.filter(p => p.id !== outId).concat(inP);
     const clubN = after.filter(p => p.nat === inP.nat).length;
+    // The 3-per-club limit is a rule you cannot buy your way around, so it still blocks.
+    // Budget does not: it is an estimate here, so going over is a red number, not a refusal.
     if (clubN > 3) { alert(`That would give you ${clubN} ${inP.team} players — the limit is 3.`); return; }
-    const over = +(after.reduce((s, p) => s + p.price, 0) - PL_BUDGET).toFixed(1);
-    if (over > 0) { alert(`That is £${over}m over budget.`); return; }
     const wasStarter = starters.includes(outId), wasCap = captain === outId;
     setSquad(squad.map(x => x === outId ? inId : x));
     setStarters(prev => wasStarter ? prev.map(x => x === outId ? inId : x) : prev);
@@ -2751,7 +2758,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   const ExportNode = () => (
     <div id="planner-export" style={{ position: "absolute", left: -99999, top: 0, width: 520, background: "#0d1829", padding: 18, fontFamily: SANS, color: TEXT }}>
       <div style={{ fontSize: 16, fontWeight: 900, color: "#fff", marginBottom: 2 }}>FPL SCOUT — My Squad</div>
-      <div style={{ fontSize: 10, color: DIM, marginBottom: 10 }}>Budget ${spent}m/{PL_BUDGET}m · {formationValid ? formationStr : "XI incomplete"}</div>
+      <div style={{ fontSize: 10, color: DIM, marginBottom: 10 }}>Budget £{spent}m/£{budget}m · {formationValid ? formationStr : "XI incomplete"}</div>
       {GW_IDX().map(mi => (
         <div key={mi} style={{ marginBottom: 12, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "#f97316", marginBottom: 4 }}>{gwLabel(mi)} ({gwDateLabel(mi)}) — {mdTotal(mi)} xPts</div>
@@ -2771,16 +2778,27 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     <div>
       {ExportNode()}
       <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", marginBottom: 2 }}>🧑‍💼 Team Planner</div>
-      <div style={{ fontSize: 11, color: DIM, marginBottom: 12 }}>Build a 15-man squad under ${PL_BUDGET}m · pick your XI + captain · plan transfers across gameweeks · saved in your browser</div>
+      <div style={{ fontSize: 11, color: DIM, marginBottom: 12 }}>Build a 15-man squad · pick your XI + captain · plan transfers across gameweeks · saved in your browser</div>
 
       {/* budget + squad status */}
       <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, fontSize: 12 }}>
-          <span>Budget: <b style={{ color: remaining < 0 ? "#ef4444" : "#fff" }}>${spent}m</b> / ${PL_BUDGET}m · <span style={{ color: remaining < 0 ? "#ef4444" : "#4ade80" }}>${remaining}m left</span></span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            Budget: <b style={{ color: remaining < 0 ? "#ef4444" : "#fff" }}>£{spent}m</b> /
+            <input type="number" min="0" step="0.1" value={budget}
+              onChange={e => setBudget(e.target.value === "" ? 0 : +e.target.value)}
+              title="Your real budget = squad value + bank. FPL sells at your own sell price, which this file does not carry, so the default £100m is only a starting point — set it to what the FPL site shows you."
+              style={{ width: 62, background: "#0a121f", border: `1px solid ${BORDER}`, borderRadius: 6, padding: "3px 6px", color: TEXT, fontFamily: "inherit", fontSize: 12 }} />m ·
+            <span style={{ color: remaining < 0 ? "#ef4444" : "#4ade80" }}>£{remaining}m {remaining < 0 ? "over" : "left"}</span>
+            {budget !== PL_BUDGET && <button onClick={() => setBudget(PL_BUDGET)} style={{ background: "none", border: "none", color: "#f97316", cursor: "pointer", fontSize: 10, padding: 0 }}>reset</button>}
+          </span>
           <span>Squad: <b style={{ color: squad.length === 15 ? "#4ade80" : "#fff" }}>{squad.length}/15</b> · XI: <b style={{ color: formationValid ? "#4ade80" : "#eab308" }}>{starters.length}/11 {formationValid ? `(${formationStr})` : "(invalid)"}</b></span>
         </div>
+        {remaining < 0 && <div style={{ fontSize: 10.5, color: "#ef4444", marginTop: 6 }}>
+          £{Math.abs(remaining)}m over budget — allowed here so you can plan freely, but FPL will reject it. Raise the budget above if it is understating what you actually have.
+        </div>}
         <div style={{ height: 6, background: "#0a121f", borderRadius: 4, marginTop: 8, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: `${Math.min(100, spent)}%`, background: remaining < 0 ? "#ef4444" : "linear-gradient(90deg,#22c55e,#f97316)" }} />
+          <div style={{ height: "100%", width: `${Math.min(100, budget > 0 ? spent / budget * 100 : 0)}%`, background: remaining < 0 ? "#ef4444" : "linear-gradient(90deg,#22c55e,#f97316)" }} />
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           <button onClick={autofill} disabled={squad.length >= 15} style={btn(false)}>✨ Autofill (best xP, affordable)</button>
@@ -2921,13 +2939,15 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
           <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
             {shown.length === 0 && <div style={{ fontSize: 12, color: DIM, padding: "10px 4px" }}>No {pickPos} matches “{pickQ}”.</div>}
             {shown.map(({ p, s, over }) => {
+                // Every row is pickable, including the ones over budget — the bank shown here
+                // is an estimate. Over-budget is priced in amber and takes the total red.
                 const afford = over <= 0;
                 return (
-                <div key={p.id} onClick={() => afford && addPlayer(p)}
-                     title={afford ? "" : `£${over}m more than you have — remove someone first`}
+                <div key={p.id} onClick={() => addPlayer(p)}
+                     title={afford ? "" : `£${over}m over the £${remaining}m this planner thinks you have — you can still pick him, the total just goes red`}
                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6,
-                              cursor: afford ? "pointer" : "not-allowed", opacity: afford ? 1 : 0.45,
-                              border: `1px solid ${BORDER}33` }}>
+                              cursor: "pointer", opacity: afford ? 1 : 0.72,
+                              border: `1px solid ${afford ? BORDER + "33" : "#eab30833"}` }}>
                   <span style={{ color: "#fff", fontSize: 13, fontWeight: 600, flex: "1 1 auto", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{flagOf(p)} {p.name} {scoutEligible(p) && "🔍"}</span>
                   <span style={{ fontSize: 11, color: DIM }}>{p.team}</span>
                   <span style={{ fontSize: 11, color: afford ? "#94a3b8" : "#eab308" }}>£{p.price}m{afford ? "" : ` (+${over})`}</span>
