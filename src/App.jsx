@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { extractWords, findAnchors, buildCards, matchSquad } from "./ocrSquad.js";
 
 // ─── PALETTE (module scope so all tab components share it) ─────────────────────
 const BG = "#060d1a", CARD = "#0d1829", BORDER = "#1e2d42", TEXT = "#e2e8f0", DIM = "#64748b";
@@ -184,6 +185,18 @@ function currentNextMd() {
   return Math.min(Math.max(i - (GW_FROM - 1), 0), HORIZON - 1);
 }
 const NEXT_MD = currentNextMd();
+// Date range for horizon slot i, derived from the real deadline list rather than a
+// hardcoded array. There used to be three separate copies of ["Aug 21-24", ...] and
+// they all still said GW1-3 after the projection had moved to GW4.
+const _MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const gwDateLabel = (i) => {
+  const d = GW_DEADLINES[GW_FROM - 1 + i];
+  if (!d) return "";
+  const s = new Date(d), e = new Date(d + 2 * 86400000);
+  return s.getUTCMonth() === e.getUTCMonth()
+    ? `${_MONTHS[s.getUTCMonth()]} ${s.getUTCDate()}-${e.getUTCDate()}`
+    : `${_MONTHS[s.getUTCMonth()]} ${s.getUTCDate()} – ${_MONTHS[e.getUTCMonth()]} ${e.getUTCDate()}`;
+};
 // Scout-bonus eligibility: +2 pts when a player is owned by <5% and returns >4 pts.
 const scoutEligible = (p) => (p.own ?? 100) < 5;
 
@@ -971,7 +984,7 @@ function StartingXITab({ pool, mobile }) {
   const score = (p, mi) => mdScore(p, mi);   // single shared per-gameweek engine (no duplicate formula)
   const benchReason = (p, mi) => {
     const wins=(p.fixtures||[]).map(f=>f?.oddsWin||0), bestMd=wins.indexOf(Math.max(...wins));
-    if (bestMd>mi) return `Tough GW${mi+1} fixture — key GW${bestMd+1} asset`;
+    if (bestMd>mi) return `Tough ${gwLabel(mi)} fixture — key ${gwLabel(bestMd)} asset`;
     if ((p.startProb||1)<0.88) return "Rotation risk — monitor";
     if (p.own<10) return "Differential option — activate for easy fixtures";
     if (p.price<5.0) return "Budget enabler — quality backup";
@@ -1001,7 +1014,6 @@ function StartingXITab({ pool, mobile }) {
   const allThree = id => idSets.every(s=>s.has(id));      // FIXTURE SHIFT = not in all 3 MD XIs
   const xi = xis[md], cap = xi.captain;
   const fixCtx = [...new Map(pool.filter(p=>(p.fixtures||[])[md]).map(p=>{const f=p.fixtures[md];return [p.team,{team:p.team,opp:f.opponent,win:f.oddsWin}];})).values()].sort((a,b)=>b.win-a.win).slice(0,5);
-  const MD_DATES=["Aug 21-24","Aug 28-31","Sep 4-6"];
 
   return (
     <div>
@@ -1015,7 +1027,7 @@ function StartingXITab({ pool, mobile }) {
       <div style={{ display:"flex", gap:4, marginBottom:12 }}>
         {GW_IDX().map(i=>(
           <button key={i} onClick={()=>setMd(i)} style={{ padding:"7px 16px", borderRadius:6, fontFamily:"inherit", fontSize:13, cursor:"pointer", fontWeight:md===i?700:400,
-            border:`1px solid ${md===i?"#f97316":BORDER}`, background:md===i?"#f9731618":"transparent", color:md===i?"#f97316":DIM }}>GW{i+1}</button>
+            border:`1px solid ${md===i?"#f97316":BORDER}`, background:md===i?"#f9731618":"transparent", color:md===i?"#f97316":DIM }}>{gwLabel(i)}</button>
         ))}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", flexWrap:"wrap", gap:8, marginBottom:6 }}>
@@ -1024,8 +1036,8 @@ function StartingXITab({ pool, mobile }) {
           <input type="checkbox" checked={showDesc} onChange={e=>setShowDesc(e.target.checked)} style={{accentColor:"#f97316"}} /> Show descriptions
         </label>
       </div>
-      <div style={{ fontSize:12, color:DIM, marginBottom:6 }}>GW{md+1} — {MD_DATES[md]} | optimised for gameweek {md+1} fixtures</div>
-      <div style={{ fontSize:12, color:"#fbbf24", marginBottom:4, fontWeight:600 }}>GW{md+1} CAPTAIN: {cap.name} vs {cap.opp} ({Math.round(cap.win*100)}% win prob)</div>
+      <div style={{ fontSize:12, color:DIM, marginBottom:6 }}>{gwLabel(md)} — {gwDateLabel(md)} | optimised for {gwLabel(md)} fixtures</div>
+      <div style={{ fontSize:12, color:"#fbbf24", marginBottom:4, fontWeight:600 }}>{gwLabel(md)} CAPTAIN: {cap.name} vs {cap.opp} ({Math.round(cap.win*100)}% win prob)</div>
       <div style={{ fontSize:11, color:DIM, marginBottom:12 }}>Easiest fixtures: {fixCtx.map(x=>`${x.team} v ${x.opp} (${Math.round(x.win*100)}%)`).join(" · ")}</div>
       {mobile && <div style={{ fontSize:11, color:DIM, marginBottom:8 }}>Tap a player for detail · bench is below the pitch</div>}
       {<div style={{ position:"relative", width:"100%", maxWidth:560, margin:"0 auto", aspectRatio:"3/4",
@@ -2113,12 +2125,199 @@ function NewsTab({ news, mobile }) {
 }
 
 // ─── TAB: PLANNER (build 15-man squad, £100m cap, per-MD xP, transfers, PNG) ──────
+// ─── SCREENSHOT IMPORT ─────────────────────────────────────────────────────────
+// Reads a screenshot of the FPL "Pick Team" / "Transfers" pitch and loads the 15
+// into the planner. Parsing lives in ocrSquad.js so it can be tested in Node
+// against real screenshots; this component is only image prep + review UI.
+//
+// tesseract.js is loaded on demand — it is a few hundred KB plus a wasm core, and
+// most visits never touch this feature.
+
+const STATUS_STYLE = {
+  ok:            { c: "#4ade80", t: "matched" },
+  clubmismatch:  { c: "#eab308", t: "different club — check" },
+  ambiguous:     { c: "#eab308", t: "close call — check" },
+  pricemismatch: { c: "#eab308", t: "price differs — check" },
+  nomatch:       { c: "#ef4444", t: "not found" },
+  noname:        { c: "#ef4444", t: "name unreadable" },
+  duplicate:     { c: "#ef4444", t: "duplicate" },
+  surplus:       { c: "#ef4444", t: "extra card" },
+};
+
+/** 2× upscale + greyscale + contrast. OCR accuracy on FPL's small card labels
+ *  roughly doubles with this; at native resolution four names in fifteen were lost. */
+async function prepImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im); im.onerror = () => rej(new Error("Could not read that image"));
+      im.src = url;
+    });
+    const scale = Math.max(2, Math.min(3.2, 2900 / img.naturalWidth));
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(img.naturalWidth * scale);
+    cv.height = Math.round(img.naturalHeight * scale);
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, cv.width, cv.height);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height);
+    const px = d.data, K = 1.3;                       // mild contrast stretch
+    for (let i = 0; i < px.length; i += 4) {
+      const g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+      const v = Math.max(0, Math.min(255, (g - 128) * K + 128));
+      px[i] = px[i + 1] = px[i + 2] = v;
+    }
+    ctx.putImageData(d, 0, 0);
+    return cv;
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function ScreenshotImport({ pool, onApply, mobile }) {
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState("");
+  const [err, setErr] = useState("");
+  const [res, setRes] = useState(null);          // { rows, squad, fixtureIndex }
+  const [picks, setPicks] = useState({});        // row index -> player id | "" (skip)
+  const [drag, setDrag] = useState(false);
+  const inputRef = useRef(null);
+
+  const run = async (file) => {
+    if (!file) return;
+    setErr(""); setRes(null); setPicks({}); setBusy(true); setProg("preparing image…");
+    try {
+      const canvas = await prepImage(file);
+      setProg("loading OCR engine…");
+      const Tesseract = await import("tesseract.js");
+      const createWorker = Tesseract.createWorker || (Tesseract.default && Tesseract.default.createWorker);
+      if (!createWorker) throw new Error("OCR engine failed to load");
+      const worker = await createWorker("eng", 1, {
+        logger: (m) => { if (m.status === "recognizing text") setProg(`reading… ${Math.round((m.progress || 0) * 100)}%`); },
+      });
+      let data;
+      try {
+        setProg("reading…");
+        ({ data } = await worker.recognize(canvas, {}, { text: true, blocks: true }));
+      } finally { await worker.terminate(); }
+      const words = extractWords(data.blocks);
+      const cards = buildCards(words, findAnchors(words));
+      if (!cards.length) throw new Error("No player cards found. Use the Pitch view on the FPL site and include the whole pitch.");
+      const r = matchSquad(cards, pool);
+      const seed = {};
+      r.rows.forEach((row, i) => { seed[i] = row.match ? row.match.id : ""; });
+      setPicks(seed); setRes(r);
+    } catch (e) {
+      setErr(e && e.message ? e.message : "Could not read that screenshot");
+    } finally { setBusy(false); setProg(""); }
+  };
+
+  const chosen = useMemo(() => {
+    if (!res) return [];
+    const ids = Object.values(picks).filter(Boolean);
+    return [...new Set(ids)];
+  }, [res, picks]);
+  const chosenPlayers = chosen.map((id) => pool.find((p) => p.id === id)).filter(Boolean);
+  const counts = chosenPlayers.reduce((a, p) => ({ ...a, [p.pos]: (a[p.pos] || 0) + 1 }), {});
+  const clubOver = Object.entries(chosenPlayers.reduce((a, p) => ({ ...a, [p.nat]: (a[p.nat] || 0) + 1 }), {})).filter(([, n]) => n > 3);
+  const cost = +chosenPlayers.reduce((s, p) => s + p.price, 0).toFixed(1);
+  const shapeOk = counts.GK === 2 && counts.DEF === 5 && counts.MID === 5 && counts.FWD === 3;
+
+  const box = { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 };
+
+  return (
+    <div style={box}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "#fff", marginBottom: 4 }}>📷 Import from a screenshot</div>
+      <div style={{ fontSize: 11.5, color: DIM, marginBottom: 9 }}>
+        Screenshot your team on the FPL site (<b style={{ color: "#cbd5e1" }}>Pitch</b> view, whole pitch visible) and drop it here.
+        Each card&rsquo;s opponent label — <span style={{ fontFamily: MONO, color: "#cbd5e1" }}>SUN (A)</span> — identifies the club,
+        so names are matched inside one squad rather than across every player. Nothing is uploaded; the reading happens in your browser.
+      </div>
+
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); run(e.dataTransfer.files && e.dataTransfer.files[0]); }}
+        onClick={() => inputRef.current && inputRef.current.click()}
+        style={{
+          border: `1.5px dashed ${drag ? "#f97316" : BORDER}`, borderRadius: 9, padding: mobile ? "16px 10px" : "20px 14px",
+          textAlign: "center", cursor: busy ? "default" : "pointer", background: drag ? "#f9731611" : "transparent",
+          color: busy ? "#f97316" : DIM, fontSize: 12.5,
+        }}
+      >
+        {busy ? (prog || "working…") : <>Drop a screenshot here, or <span style={{ color: "#f97316", fontWeight: 700 }}>choose a file</span></>}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" style={{ display: "none" }}
+             onChange={(e) => { run(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+
+      {err && <div style={{ marginTop: 9, fontSize: 12, color: "#ef4444" }}>⚠ {err}</div>}
+
+      {res && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12, color: DIM, marginBottom: 6 }}>
+            Read {res.rows.length} cards against <b style={{ color: "#cbd5e1" }}>{gwLabel(res.fixtureIndex)}</b> fixtures.
+            Check anything highlighted, then load it.
+          </div>
+          <div style={{ maxHeight: 300, overflowY: "auto", border: `1px solid ${BORDER}`, borderRadius: 8 }}>
+            {res.rows.map((r, i) => {
+              const st = STATUS_STYLE[r.status] || STATUS_STYLE.ok;
+              const opts = r.alternatives && r.alternatives.length
+                ? r.alternatives
+                : (r.club ? pool.filter((p) => p.nat === r.club).map((p) => ({ id: p.id, name: p.name, nat: p.nat, price: p.price, pos: p.pos })) : []);
+              const wide = pool.slice().sort((a, b) => a.name.localeCompare(b.name));
+              const list = r.status === "ok" ? opts : [...opts, ...wide.filter((w) => !opts.some((o) => o.id === w.id))];
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 9px",
+                                      borderBottom: i < res.rows.length - 1 ? `1px solid ${BORDER}55` : "none", fontSize: 12 }}>
+                  <span style={{ fontFamily: MONO, fontSize: 10, color: DIM, width: 58, flexShrink: 0 }}>{r.code} ({r.home ? "H" : "A"})</span>
+                  <span style={{ color: "#94a3b8", width: mobile ? 74 : 110, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.rawName || "—"}</span>
+                  <span style={{ color: DIM, flexShrink: 0 }}>→</span>
+                  <select
+                    value={picks[i] || ""}
+                    onChange={(e) => setPicks({ ...picks, [i]: e.target.value ? +e.target.value : "" })}
+                    style={{ flex: "1 1 auto", minWidth: 0, background: "#0a121f", color: TEXT, border: `1px solid ${st.c}55`,
+                             borderRadius: 5, padding: "3px 5px", fontFamily: "inherit", fontSize: 12 }}
+                  >
+                    <option value="">— skip —</option>
+                    {list.slice(0, 200).map((o) => (
+                      <option key={o.id} value={o.id}>{o.name} ({o.nat} {o.pos} £{o.price}m)</option>
+                    ))}
+                  </select>
+                  <span style={{ color: st.c, fontSize: 10, width: mobile ? 0 : 120, flexShrink: 0, display: mobile ? "none" : "block" }}>{st.t}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 9, fontSize: 12 }}>
+            <span>Selected <b style={{ color: chosen.length === 15 ? "#4ade80" : "#eab308" }}>{chosen.length}/15</b></span>
+            <span style={{ color: DIM }}>·</span>
+            <span style={{ color: shapeOk ? "#4ade80" : "#eab308" }}>{counts.GK || 0} GK · {counts.DEF || 0} DEF · {counts.MID || 0} MID · {counts.FWD || 0} FWD</span>
+            <span style={{ color: DIM }}>·</span>
+            <span style={{ color: cost > PL_BUDGET ? "#ef4444" : "#cbd5e1" }}>£{cost}m</span>
+            {clubOver.length > 0 && <span style={{ color: "#ef4444" }}>· {clubOver.map(([c, n]) => `${n} from ${c}`).join(", ")}</span>}
+            <button
+              onClick={() => onApply(chosen)}
+              disabled={!chosen.length}
+              style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 6, cursor: chosen.length ? "pointer" : "default",
+                       border: `1px solid ${chosen.length ? "#f97316" : BORDER}`, background: chosen.length ? "#f9731618" : "transparent",
+                       color: chosen.length ? "#f97316" : DIM, fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}
+            >Load {chosen.length} into planner</button>
+          </div>
+          {!shapeOk && chosen.length > 0 &&
+            <div style={{ fontSize: 11, color: "#eab308", marginTop: 6 }}>
+              Not a legal 2/5/5/3 squad yet — you can still load it and fix it by hand.
+            </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PL_LIMITS = { GK: 2, DEF: 5, MID: 5, FWD: 3 };   // 15-man squad shape
 const PL_XI_MAX = { GK: 1, DEF: 5, MID: 5, FWD: 3 };   // max of each position in the starting XI
 const PL_BUDGET = 100;
 const PL_FORMS = [[3, 4, 3], [3, 5, 2], [4, 3, 3], [4, 4, 2], [4, 5, 1], [5, 3, 2], [5, 4, 1]];
 const PL_KEY = "fpl_planner_v1";
-const PL_MD_DATES = ["Aug 21-24", "Aug 28-31", "Sep 4-6"];
 
 function PlannerTab({ pool, mobile, watch, toggleWatch }) {
   const byId = useMemo(() => { const m = {}; (pool || []).forEach(p => { m[p.id] = p; }); return m; }, [pool]);
@@ -2213,6 +2412,28 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     if (best) { setStarters(best.ids); const capId = best.ids.reduce((a, b) => ptsOf(byId[b], mi) > ptsOf(byId[a], mi) ? b : a); setCaptain(capId); }
   };
 
+  // Replace the whole squad from a screenshot import, then pick the best legal XI
+  // for the gameweek currently in view so the planner is immediately useful.
+  const applyImport = (ids) => {
+    const players = ids.map(id => byId[id]).filter(Boolean).slice(0, 15);
+    setSquad(players.map(p => p.id));
+    setTransfers(0); setPendingOut(0); setSubbingId(null); setMenuId(null);
+    const byPos = (pos) => players.filter(p => p.pos === pos).map(p => ({ id: p.id, s: ptsOf(p, md) })).sort((a, b) => b.s - a.s);
+    const G = byPos("GK"), D = byPos("DEF"), M = byPos("MID"), F = byPos("FWD");
+    let best = null;
+    for (const [d, m, f] of PL_FORMS) {
+      if (!G[0] || D.length < d || M.length < m || F.length < f) continue;
+      const arr = [G[0], ...D.slice(0, d), ...M.slice(0, m), ...F.slice(0, f)];
+      const tot = arr.reduce((s, x) => s + x.s, 0);
+      if (!best || tot > best.tot) best = { ids: arr.map(x => x.id), tot };
+    }
+    if (best) {
+      setStarters(best.ids);
+      setCaptain(best.ids.reduce((a, b) => ptsOf(byId[b], md) > ptsOf(byId[a], md) ? b : a));
+      setViceCaptain(null);
+    } else { setStarters([]); setCaptain(null); setViceCaptain(null); }
+  };
+
   // Autofill: fill remaining squad slots with the highest next-MD xP players that are affordable,
   // reserving ~£3.9m per still-empty slot so the squad can always be completed to 15.
   const autofill = () => {
@@ -2290,7 +2511,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
         <span style={{ fontSize: 10, color: POS_COLOR[p.pos], fontFamily: MONO, width: 26 }}>{p.pos}</span>
         <div style={{ flex: "1 1 auto", minWidth: 0 }}>
           <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{flagOf(p)} {p.name} {isC && <span style={{ color: "#fbbf24" }}>©</span>}{isVC && <span style={{ color: "#cbd5e1" }}>Ⓥ</span>} {scout && <span title="Scout-bonus eligible (<5% owned): +2 pts if returns >4">🔍</span>}</div>
-          <div style={{ fontSize: 10, color: DIM }}>{p.team} · £{p.price}m · {opp ? `GW${md + 1} vs ${opp}` : `no GW${md + 1} fixture`} · <b style={{ color: pts > 6 ? "#f97316" : pts > 4 ? "#22c55e" : DIM }}>{pts} xP</b></div>
+          <div style={{ fontSize: 10, color: DIM }}>{p.team} · £{p.price}m · {opp ? `${gwLabel(md)} vs ${opp}` : `no ${gwLabel(md)} fixture`} · <b style={{ color: pts > 6 ? "#f97316" : pts > 4 ? "#22c55e" : DIM }}>{pts} xP</b></div>
         </div>
         <button onClick={() => toggleStarter(p.id)} title="Toggle starter / bench" style={{ ...btn(isS), padding: "4px 8px" }}>{isS ? "XI" : "sub"}</button>
         <button onClick={() => { setCaptain(p.id); if (viceCaptain === p.id) setViceCaptain(null); }} disabled={!isS} title="Make captain" style={{ ...btn(isC), padding: "4px 8px", opacity: isS ? 1 : 0.4 }}>C</button>
@@ -2300,14 +2521,14 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
     );
   };
 
-  // ─ off-screen export node: all 3 MDs ─
+  // ─ off-screen export node: every gameweek in the horizon ─
   const ExportNode = () => (
     <div id="planner-export" style={{ position: "absolute", left: -99999, top: 0, width: 520, background: "#0d1829", padding: 18, fontFamily: SANS, color: TEXT }}>
       <div style={{ fontSize: 16, fontWeight: 900, color: "#fff", marginBottom: 2 }}>FPL SCOUT — My Squad</div>
       <div style={{ fontSize: 10, color: DIM, marginBottom: 10 }}>Budget ${spent}m/{PL_BUDGET}m · {formationValid ? formationStr : "XI incomplete"}</div>
       {GW_IDX().map(mi => (
         <div key={mi} style={{ marginBottom: 12, borderTop: `1px solid ${BORDER}`, paddingTop: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: "#f97316", marginBottom: 4 }}>GW{mi + 1} ({PL_MD_DATES[mi]}) — {mdTotal(mi)} xPts</div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#f97316", marginBottom: 4 }}>{gwLabel(mi)} ({gwDateLabel(mi)}) — {mdTotal(mi)} xPts</div>
           {starters.map(id => byId[id]).filter(Boolean).sort((a, b) => POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos)).map(p => (
             <div key={p.id} style={{ fontSize: 11, color: "#cbd5e1", display: "flex", justifyContent: "space-between" }}>
               <span>{p.pos} · {p.name}{captain === p.id ? " ©" : ""} {oppOf(p, mi) ? `vs ${oppOf(p, mi)}` : ""}</span>
@@ -2337,17 +2558,19 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           <button onClick={autofill} disabled={squad.length >= 15} style={btn(false)}>✨ Autofill (best xP, affordable)</button>
-          <button onClick={() => autoXI(md)} disabled={squad.length < 11} style={btn(false)}>⚡ Auto-pick XI (GW{md + 1})</button>
-          <button onClick={exportPng} disabled={!starters.length || pngBusy} style={btn(false)}>{pngBusy ? "…rendering" : "📸 Save PNG (3 MDs)"}</button>
+          <button onClick={() => autoXI(md)} disabled={squad.length < 11} style={btn(false)}>⚡ Auto-pick XI ({gwLabel(md)})</button>
+          <button onClick={exportPng} disabled={!starters.length || pngBusy} style={btn(false)}>{pngBusy ? "…rendering" : `📸 Save PNG (${HORIZON} GWs)`}</button>
           <button onClick={() => { if (confirm("Clear your whole squad?")) { setSquad([]); setStarters([]); setCaptain(null); setViceCaptain(null); setTransfers(0); setPendingOut(0); setSubbingId(null); setMenuId(null); } }} style={{ ...btn(false), color: "#ff6b6b", borderColor: "#ef444455" }}>Clear</button>
         </div>
         {squad.length >= 15 && <div style={{ fontSize: 11, color: DIM, marginTop: 8 }}>Transfers made: <b style={{ color: "#fff" }}>{transfers}</b> · 2 free/MD, then −4 each → projected hit <b style={{ color: transferHit ? "#ef4444" : "#4ade80" }}>−{transferHit}</b> · <button onClick={() => setTransfers(0)} style={{ background: "none", border: "none", color: "#f97316", cursor: "pointer", fontSize: 11, padding: 0 }}>reset (new gameweek)</button></div>}
       </div>
 
+      <ScreenshotImport pool={pool} onApply={applyImport} mobile={mobile} />
+
       {/* MD tabs + total */}
       <div style={{ display: "flex", gap: 4, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
-        {GW_IDX().map(i => <button key={i} onClick={() => setMd(i)} style={btn(md === i)}>GW{i + 1}</button>)}
-        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#fff" }}>GW{md + 1} projected: <span style={{ color: "#f97316" }}>{mdTotal(md)} xPts</span></span>
+        {GW_IDX().map(i => <button key={i} onClick={() => setMd(i)} style={btn(md === i)}>{gwLabel(i)}</button>)}
+        <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#fff" }}>{gwLabel(md)} projected: <span style={{ color: "#f97316" }}>{mdTotal(md)} xPts</span></span>
       </div>
 
       <div style={{ display:"flex", gap:14, alignItems:"flex-start", flexDirection: mobile?"column":"row", marginBottom:10 }}>
@@ -2357,7 +2580,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>Starting XI {formationValid ? `· ${formationStr}` : `· ${starters.length}/11`} {!formationValid && <span style={{ color: "#eab308", fontWeight: 400, fontSize: 11 }}>(pick a valid XI: 1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD)</span>}</span>
-            <span style={{ fontSize: 11, color: DIM }}>tap a player = captain · GW{md + 1}: <b style={{ color: "#f97316" }}>{mdTotal(md)} xPts</b></span>
+            <span style={{ fontSize: 11, color: DIM }}>tap a player = captain · {gwLabel(md)}: <b style={{ color: "#f97316" }}>{mdTotal(md)} xPts</b></span>
           </div>
           <div onClick={() => setMenuId(null)} style={{ position: "relative", width: "100%", maxWidth: 560, margin: "0 auto", aspectRatio: "3/4", background: "linear-gradient(#0a3d1f,#072d17)", border: "2px solid #1e6b3a", borderRadius: 10 }}>
             <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 1, background: "#2e7d4f" }} />
@@ -2438,7 +2661,7 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
       {pickPos && (
         <div style={{ background: CARD, border: `1px solid #f9731655`, borderRadius: 10, padding: 12, marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <b style={{ color: "#fff", fontSize: 13 }}>Add a {pickPos} — highest GW{md + 1} xP first</b>
+            <b style={{ color: "#fff", fontSize: 13 }}>Add a {pickPos} — highest {gwLabel(md)} xP first</b>
             <button onClick={() => setPickPos(null)} style={{ ...btn(false), padding: "4px 8px" }}>close</button>
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -2471,9 +2694,9 @@ function PlannerTab({ pool, mobile, watch, toggleWatch }) {
 
       {/* suggested transfers */}
       <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, padding: 12, marginTop: 6 }}>
-        <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 6 }}>💡 Suggested transfers — GW{md + 1} (by xP gain · 🔍 = scout upgrade)</div>
+        <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 6 }}>💡 Suggested transfers — {gwLabel(md)} (by xP gain · 🔍 = scout upgrade)</div>
         {sp.length < 11 ? <div style={{ fontSize: 12, color: DIM }}>Fill your squad to see transfer suggestions.</div>
-          : suggestions.length === 0 ? <div style={{ fontSize: 12, color: DIM }}>No positive-value swaps within budget — your squad looks optimal for GW{md + 1}.</div>
+          : suggestions.length === 0 ? <div style={{ fontSize: 12, color: DIM }}>No positive-value swaps within budget — your squad looks optimal for {gwLabel(md)}.</div>
             : suggestions.map((sg, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderTop: i ? `1px solid ${BORDER}33` : "none", fontSize: 12, flexWrap: "wrap" }}>
                 <span style={{ color: "#ff8c42", flex: "1 1 120px" }}>OUT {sg.outP.name} <span style={{ color: DIM }}>({ptsOf(sg.outP, md)})</span></span>
@@ -2513,7 +2736,6 @@ function OddsTab({ pool, lineups, mobile }) {
       .map(p => ({ p, ...mdScorerProb(p, md) })).filter(x => x.pGoal > 0.03);
     return { goals: ps.slice().sort((a, b) => b.pGoal - a.pGoal).slice(0, 5), assists: ps.slice().sort((a, b) => b.pAssist - a.pAssist).slice(0, 3) };
   };
-  const MD_DATES = ["Aug 21–24", "Aug 28–31", "Sep 4–6"];
   const Row = ({ g, key2 }) => (
     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "2px 0" }}>
       <span style={{ color: "#e2e8f0", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.p.name} <span style={{ color: DIM, fontSize: 10 }}>{g.p.team}</span></span>
@@ -2525,8 +2747,8 @@ function OddsTab({ pool, lineups, mobile }) {
       <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>🎲 Match Odds & Scorer Probabilities</div>
       <div style={{ fontSize: 11, color: DIM, marginBottom: 10 }}>Model-implied probabilities (Poisson on the xG/xA model) — not bookmaker lines. Group stage · {matches.length} fixtures.</div>
       <div style={{ display: "flex", gap: 4, marginBottom: 12, alignItems: "center" }}>
-        {GW_IDX().map(i => <button key={i} onClick={() => setMd(i)} style={{ padding: "7px 16px", borderRadius: 6, fontFamily: "inherit", fontSize: 13, cursor: "pointer", fontWeight: md === i ? 700 : 400, border: `1px solid ${md === i ? "#f97316" : BORDER}`, background: md === i ? "#f9731618" : "transparent", color: md === i ? "#f97316" : DIM }}>GW{i + 1}</button>)}
-        <span style={{ marginLeft: "auto", fontSize: 11, color: DIM }}>{MD_DATES[md]}</span>
+        {GW_IDX().map(i => <button key={i} onClick={() => setMd(i)} style={{ padding: "7px 16px", borderRadius: 6, fontFamily: "inherit", fontSize: 13, cursor: "pointer", fontWeight: md === i ? 700 : 400, border: `1px solid ${md === i ? "#f97316" : BORDER}`, background: md === i ? "#f9731618" : "transparent", color: md === i ? "#f97316" : DIM }}>{gwLabel(i)}</button>)}
+        <span style={{ marginLeft: "auto", fontSize: 11, color: DIM }}>{gwDateLabel(md)}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: mobile ? "1fr" : "repeat(auto-fill,minmax(330px,1fr))", gap: 12 }}>
         {matches.map((mt, i) => {
